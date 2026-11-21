@@ -69,8 +69,12 @@
 ## Slide 5: Pilot Region — Sakleshpur Taluk (Karnataka)
 - **Topography:** Western Ghats highland (elevation 89.5m to 1,376.5m from 30m Copernicus/SRTM DEM) with steep ridges, dense valleys, and plantation corridors.
 - **Coordinates:** Lat $12.80^\circ - 13.10^\circ\text{N}$, Lon $75.60^\circ - 75.95^\circ\text{E}$ (UTM Zone 43N), derived strictly from `contracts/config.json`.
-- **Population Analyzed:** [N from real run] rural residents across [N cells from real run] grid cells ($300\text{m} \times 300\text{m}$).
-- **Baseline Gap:** [N from real run] unserved residents across [N gap cells from real run] modeled gap cells.
+- **Population Analyzed:** **404,254** rural residents across **11,394** grid cells ($300\text{m} \times 300\text{m}$).
+- **Baseline Gap Distribution:**
+  - **Likely Gap ($< -106\text{ dBm}$):** **361,044** unserved residents across **10,176** cells (89.3%).
+  - **Uncertain Band ($-106\text{ to } -94\text{ dBm}$):** **28,364** residents across **721** cells (7.0%).
+  - **Likely Covered ($\ge -94\text{ dBm}$):** **10,885** residents across **308** cells (2.7%).
+  - **Unknown ($> 15\text{ km}$ from tower):** **3,961** residents across **189** cells (1.0%).
 
 ---
 
@@ -78,21 +82,22 @@
 - **Feasibility Pass/Fail Filters:**
   - **Surface Slope:** Must be $< 15.0^\circ$ (calculated from 2D DEM gradient).
   - **Road Access:** Must be $\le 1.0\text{ km}$ from OpenStreetMap verified roads (calculated via STRtree spatial index).
-- **Prioritized Shortlist (Populated dynamically on real run):**
-  1. **[Site 1 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
-  2. **[Site 2 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
-  3. **[Site 3 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
-  4. **[Site 4 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
-  5. **[Site 5 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
-- **Overall Impact:** Top sites bring **[N from real run]** rural residents into reliable mobile coverage (a **[X% from real run]** gap reduction).
+- **Prioritized Shortlist (Populated dynamically from real ranking engine):**
+  1. **CAND-09** (Anemahal, CL-03): **+6,936** newly covered | Road: **0.12 km** | Slope: **7.9°** | **Fiber along road (125m)**
+  2. **CAND-011** (Anemahal, CL-03): **+4,572** newly covered | Road: **0.32 km** | Slope: **3.9°** | **Fiber along road (316m)**
+  3. **CAND-02** (Donigal, CL-01): **+1,427** newly covered | Road: **0.58 km** | Slope: **5.7°** | **Microwave LoS to Sakleshpur HQ**
+  4. **CAND-05** (Donigal, CL-01): **+708** newly covered | Road: **0.21 km** | Slope: **11.8°** | **Fiber along road (207m)**
+  5. **CAND-08** (Anemahal, CL-03): **+584** newly covered | Road: **0.62 km** | Slope: **0.3°** | **Microwave LoS to Sakleshpur HQ**
+- **Overall Impact:** Top 5 sites bring **14,227** rural residents into reliable mobile coverage (a **3.94%** reduction of total unserved gap population).
 
 ---
 
 ## Slide 7: The "Needs Field Survey" Cluster
-- **Cluster [ID from real run] ([Remote Western Ghats Escarpment]):**
-  - Population in gap: [N from real run] residents.
-  - Slope: [N° from real run] (exceeds $15^\circ$ macrocell threshold).
-  - Distance to road: [N km from real run] (exceeds $1.0\text{ km}$ vehicular road access limit).
+- **Cluster CL-04 (Heggadde / Western Ghats Escarpment):**
+  - Population in gap: **17,376** unserved residents across **589** cells.
+  - Slope: **19.2°** (exceeds $15.0^\circ$ macrocell threshold).
+  - Distance to road: **1.95 km** (exceeds $1.0\text{ km}$ vehicular road access limit).
+  - Target Hamlets: Heggadde, Mankanahalli.
 - **Honest Automated Failure:** The system outputs `candidate_ids: []` with an explicit alert: **"Needs Field Survey"**.
 - **Actionable Value:** Recommends off-grid solar micro-masts, localized relays, or satellite small-cells rather than misleading planners with unbuildable macrocell coordinates.
 
@@ -103,20 +108,20 @@
    - Open Map view centered on Sakleshpur Taluk.
    - Point out the 300m cells colored by signal strength.
    - Show the **MODELED DATA** badge and the **Uncertain band** (amber cells).
-   - Highlight the **[N from real run] unserved population counter**.
+   - Highlight the **361,044 unserved population counter** (10,176 gap cells).
 2. **0:45 - 1:45 | Shortlist Table & Zoom:**
    - Switch to the Ranked Sites table.
-   - Click top candidate (+[N from real run] pop covered). The map smoothly flies to the site.
-   - Point out the visible feasibility columns (Road distance, Slope, Backhaul).
-   - Click the **Gap Clusters** tab and highlight the cluster marked *"Needs Field Survey"*.
+   - Click top candidate (**+6,936** pop covered). The map smoothly flies to the site.
+   - Point out the visible feasibility columns (Road distance 0.12 km, Slope 7.9°, Fiber backhaul).
+   - Click the **Gap Clusters** tab and highlight Cluster CL-04 (Heggadde) marked *"Needs Field Survey"*.
 3. **1:45 - 2:30 | Dynamic What-If Simulation:**
-   - Grab Candidate #1 pin and drag it 1.5 km west into the valley.
-   - On drop, the FastAPI engine recalculates in **[benchmark ms from real run]** (comfortably under 500 ms).
+   - Grab Candidate #1 (CAND-09) pin and drag it 1.5 km west into the valley.
+   - On drop, the FastAPI engine recalculates in **29.08 ms** (direct engine **19.75 ms**, $34\times$ faster than 1,000 ms target).
    - Show the **+Newly Covered Population** counter dynamically updating.
    - Drag it back or click **"Reset Sites"** to prove idempotent updates with zero leftover footprints.
    - Click **"Viewing: After"** to toggle before/after baseline.
 4. **2:30 - 3:00 | Printable One-Page Brief:**
-   - Click **"Generate Cluster Brief"** on a gap cluster.
+   - Click **"Generate Cluster Brief"** on a gap cluster (CL-01 Donigal or CL-03 Anemahal).
    - Show the clean executive briefing document ready for Digital Bharat Nidhi planners.
    - Click **"Print / Save as PDF"** to demonstrate browser print formatting.
    - Close on the **Honest Limitations** slide.
