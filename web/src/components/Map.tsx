@@ -100,7 +100,7 @@ export const CoverageMap: React.FC<MapProps> = ({
       }
 
       // Expose console helper for testing feature state
-      (window as any).testRecolorCell = (cellId: number = 0, dbm: number = -75.0) => {
+      (window as any).testRecolorCell = (cellId: number = 1, dbm: number = -75.0) => {
         if (!mapRef.current) return;
         mapRef.current.setFeatureState({ source: 'cells', id: cellId }, { dbm });
         previousOverriddenRef.current.add(cellId);
@@ -219,7 +219,10 @@ export const CoverageMap: React.FC<MapProps> = ({
           const props = feat.properties || {};
           const cellId = feat.id;
           const pop = props.pop || 'N/A';
-          const baseDbm = props.baseline_dbm !== undefined ? `${props.baseline_dbm} dBm` : 'Unknown';
+          const baseDbm =
+            props.baseline_dbm !== undefined && props.baseline_dbm !== null
+              ? `${props.baseline_dbm} dBm`
+              : 'None (Beyond model radius)';
           const state = props.state || 'Unknown';
 
           new Popup({ closeButton: true, className: 'dark-popup' })
@@ -423,7 +426,7 @@ export const CoverageMap: React.FC<MapProps> = ({
           className="btn-dev-recolor"
           onClick={() => {
             if ((window as any).testRecolorCell) {
-              (window as any).testRecolorCell(0, -78.0);
+              (window as any).testRecolorCell(1, -78.0);
             }
           }}
           title="Dev-only helper: calls setFeatureState on cell #0 to verify data-driven recolor"
