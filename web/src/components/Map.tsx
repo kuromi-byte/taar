@@ -28,6 +28,8 @@ interface MapProps {
   overriddenDbmMap?: Map<number, number>;
   showModeled: boolean;
   flyToTarget: { lat: number; lon: number } | null;
+  cellsError?: string | null;
+  onRetryCells?: () => void;
 }
 
 export const CoverageMap: React.FC<MapProps> = ({
@@ -39,6 +41,8 @@ export const CoverageMap: React.FC<MapProps> = ({
   overriddenDbmMap,
   showModeled,
   flyToTarget,
+  cellsError = null,
+  onRetryCells,
 }) => {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -430,6 +434,22 @@ export const CoverageMap: React.FC<MapProps> = ({
             MapLibre GL requires WebGL hardware acceleration to render the map tiles.
             Please verify that <strong>Use hardware acceleration when available</strong> is enabled in your browser settings.
           </p>
+        </div>
+      )}
+
+      {/* Full-panel Error Overlay when cells.geojson fails to load */}
+      {cellsError && (
+        <div className="full-panel-error" role="alert">
+          <div className="full-panel-error-card">
+            <div className="error-icon-large">⚠️</div>
+            <h2 className="error-title">Failed to load coverage data</h2>
+            <p className="error-desc">{cellsError}</p>
+            {onRetryCells && (
+              <button className="btn-primary" onClick={onRetryCells}>
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       )}
 

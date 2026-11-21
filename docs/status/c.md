@@ -209,3 +209,79 @@ Automated via [`scratch/run_double_drag_cdp.mjs`](file:///C:/Users/20635/.gemini
 ### D. Final Build & Tree-Shaking
 - Vitest: **35 / 35 tests passed** across all 5 test files.
 - `npm run build`: Production build succeeded in 3.20s; `dist/assets/*.js` contains **0 occurrences** of `__bench`.
+
+## Task 4 Loading & Error States Verification [REAL DATA & CDP]
+
+### A. Pure Logic & State Machine (Vitest)
+1. **Contract Validation (`web/src/utils/validateRecompute.ts`)**:
+   - `validateRecomputeResponse(x)` strictly validates recompute payload shape:
+     - `changed`: Array of `[integer id, finite number]` tuples.
+     - `newly_covered_pop`: Non-negative integer.
+     - `total_unserved_pop`: Non-negative integer.
+     - Empty `changed: []` is valid.
+     - Extra/unknown keys in response are safely ignored.
+     - IDs not present in loaded cells are tolerated without throwing.
+   - Comprehensive unit tests: **7 / 7 passed** (`web/src/utils/validateRecompute.test.ts`).
+2. **Recompute State Machine (`web/src/utils/recomputeStatus.ts`)**:
+   - Transitions: `idle -> loading -> slow (after SLOW_MS) -> success | error | empty`.
+   - Timing constants declared in `web/src/config/data.ts`: `SLOW_MS = 1500` ms, `TIMEOUT_MS = 15000` ms (with dev overrides).
+   - Sequence tracking: Newer requests immediately cancel older status updates.
+   - Timer transitions verified with fake timers: **9 / 9 passed** (`web/src/utils/recomputeStatus.test.ts`).
+
+### B. App Integration & Error Handling
+1. **Request Lifecycle & AbortController**:
+   - Every candidate marker drop instantiates an `AbortController` coupled with `TIMEOUT_MS`.
+   - Subsequent candidate drops immediately abort in-flight requests while incrementing `requestSeqRef`.
+2. **Loading States**:
+   - Non-blocking `.counter-loading-pill` displayed beside metrics.
+   - Counter values remain visible but dimmed (`.dimmed`) while awaiting response.
+   - Transitions automatically to `"Still computing, this is taking longer than usual..."` when request duration exceeds 1,500 ms.
+   - Map remains fully interactive during calculation.
+3. **Error Banner & Non-Destructive Failure**:
+   - Failure (network down, HTTP 500, timeout, schema violation) preserves existing feature-state, overridden IDs, and counter numbers.
+   - Counters tagged with `"from previous result"` (`.metric-stale-tag`).
+   - Accessible banner rendered with `role="alert"` displaying human-friendly error messages (no stack traces or raw JSON).
+   - `"Retry"` button triggers immediate recalculation with current candidates.
+   - `"Revert marker"` restores candidate marker coordinates to the last successfully computed configuration and dismisses the alert.
+4. **Empty Footprint State**:
+   - Valid responses with `changed: []` clear previous footprint overrides, set newly covered population to 0, and display a neutral note: `"This position adds no new coverage."`.
+5. **Data Asset Boundaries**:
+   - `cells.geojson` failure displays a full-panel error overlay with a Retry button while keeping the signal classification legend visible.
+   - `candidates.json` failure displays an error state within the shortlist sidebar with Retry while the map and baseline cells remain functional.
+   - Modeled badge, legend, and MOCK banner remain visible in all states.
+
+### C. Browser CDP Verification Results Matrix
+Automated in headless browser using Chrome DevTools Protocol request interception (`Fetch.enable`):
+
+| Test Case | Scenario / Interception | Expected Message / Behavior | Actual Result | Status | `ids_changed_on_failure` |
+|:---|:---|:---|:---|:---:|:---:|
+| **(a)** | Connection Refused / Network Down | `"Can't reach the server"` banner (`role="alert"`), counters unchanged, Retry button recovers on network restoration | Exact banner, stale tag shown, Retry restored footprint (1,200 pop) | **PASS** | 0 |
+| **(b)** | HTTP 500 Internal Error | `"The server returned an error (HTTP 500)"` banner, counters unchanged | Exact banner displayed, stale tag shown | **PASS** | 0 |
+| **(c)** | Slow Request (3s delay) | Pill shows `"Still computing, this is taking longer than usual..."` at 2s; final result applies at 3s | Slow text observed at 2s, final footprint applied at 3.5s (1,500 pop), pill hidden | **PASS** | 0 |
+| **(d)** | Request Timeout | `"The server took too long to respond"` banner after timeout exceeds threshold | Abort fired on timeout, exact banner displayed, stale tag shown | **PASS** | 0 |
+| **(e)** | Unexpected Response (Bad JSON & Shape) | `"The server sent an unexpected response"` for HTML body and malformed payload | Exact banner displayed for both bad JSON and bad shape | **PASS** | 0 |
+| **(f)** | Empty Response (`changed: []`) | Overrides cleared, newly covered = 0, neutral note: `"This position adds no new coverage."`, no error banner | Footprint cleared, note visible, no error banner displayed | **PASS** | 0 |
+| **(g)** | Failure After Successful Drop | Previous footprint retained, counters show previous values marked `"from previous result"` | Footprint retained, counter marked with stale tag, error banner displayed | **PASS** | 0 |
+| **(h)** | Revert Marker Action | Restores marker position to last successful coordinates, dismisses error banner | Marker restored to `(12.910000, 75.810000)`, error dismissed, active status restored | **PASS** | 0 |
+| **(i)** | Rapid Drops (Abort / Sequence Guard) | Drop 1 (delayed) aborted; Drop 2 applies immediately; Drop 1 never overwrites Drop 2 | Drop 2 applied immediately (2,500 pop); Drop 1 response discarded by sequence guard | **PASS** | 0 |
+| **Cells Load** | Block `cells.geojson` (HTTP 404) | Full-panel error overlay with Retry button; map legend kept visible | Full-panel overlay rendered; Retry button recovers on unblock | **PASS** | 0 |
+| **Shortlist Load** | Block `candidates.json` (HTTP 404) | Shortlist sidebar error state with Retry; map remains interactive | Shortlist error displayed; map functional; Retry recovers on unblock | **PASS** | 0 |
+
+### D. Captured E2E Screenshots
+All test states captured in [`web/e2e-output/`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output):
+- [`task4_a_connection_error.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_a_connection_error.png) (83.8 KB)
+- [`task4_b_http_500.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_b_http_500.png) (84.8 KB)
+- [`task4_c_slow_loading.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_c_slow_loading.png) (90.5 KB)
+- [`task4_d_timeout.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_d_timeout.png) (84.0 KB)
+- [`task4_e_unexpected_response.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_e_unexpected_response.png) (84.3 KB)
+- [`task4_f_empty_coverage.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_f_empty_coverage.png) (93.3 KB)
+- [`task4_g_stale_result_retained.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_g_stale_result_retained.png) (83.6 KB)
+- [`task4_h_reverted_marker.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_h_reverted_marker.png) (93.9 KB)
+- [`task4_i_rapid_drops_superseded.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_i_rapid_drops_superseded.png) (94.2 KB)
+- [`task4_cells_error_full_panel.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_cells_error_full_panel.png) (59.9 KB)
+- [`task4_shortlist_error.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/task4_shortlist_error.png) (79.8 KB)
+
+### E. Final Test Suite & Build Verification
+- **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files (`recompute`, `validateRecompute`, `recomputeStatus`, `styleExpressions`, `requestSequence`, `components`, `params`).
+- **Production Build**: `tsc && vite build` completed cleanly in 6.83s.
+- **Tree-Shaking Verification**: `dist/assets/*.js` contains **0 occurrences** of `__bench`.
