@@ -51,15 +51,15 @@
 ---
 
 ## Slide 4: Propagation Model & Terrain Physics
-1. **Frequency Baseline:** 900 MHz (Okumura-Hata open-area formulation) with 30m macrocell tower height ($h_b$) and 1.5m mobile receiver ($h_m$).
+1. **Frequency Baseline:** 900 MHz (Okumura-Hata open-area formulation) with 30m macrocell tower height ($h_b$, assumed) and 1.5m mobile receiver ($h_m$).
 2. **Polar Sweep Shadowing:**
    - 720 rays cast at $0.5^\circ$ angular resolution out to 10 km (333 steps of 30m).
    - Vectorized running maximum elevation angle along each ray (`np.maximum.accumulate`).
-   - Obstructed cells receive a flat 15 dB shadow diffraction penalty.
+   - Obstructed cells receive a flat 15 dB shadow diffraction penalty (assumed).
 3. **Best-Server Aggregation:**
    - For every cell, received power $P_{rx} = \max_{t \in \text{towers}} (P_{tx} - L_{hata}(d) - L_{shadow})$.
 4. **Honest State Classification:**
-   - **Likely Covered:** $\ge -94\text{ dBm}$ (emerald green)
+   - **Likely Covered:** $\ge -94\text{ dBm}$ (green)
    - **Uncertain Band:** $-106\text{ to } -94\text{ dBm}$ ($\pm 6\text{ dB}$ around threshold; amber)
    - **Likely Gap:** $< -106\text{ dBm}$ (red)
    - **Unknown:** Distance to nearest recorded tower $> 15\text{ km}$ (missing data, not confirmed gap)
@@ -67,10 +67,10 @@
 ---
 
 ## Slide 5: Pilot Region — Sakleshpur Taluk (Karnataka)
-- **Topography:** Western Ghats highland (elevation 89.5m to 1,376.5m) with steep ridges, dense valleys, and coffee plantations.
-- **Coordinates:** Lat $12.80^\circ - 13.10^\circ\text{N}$, Lon $75.60^\circ - 75.95^\circ\text{E}$ (UTM Zone 43N).
-- **Population Analyzed:** 25,684 rural residents across 900 grid cells ($300\text{m} \times 300\text{m}$).
-- **Baseline Gap:** 19,309 unserved residents across 802 gap cells.
+- **Topography:** Western Ghats highland (elevation 89.5m to 1,376.5m from 30m Copernicus/SRTM DEM) with steep ridges, dense valleys, and plantation corridors.
+- **Coordinates:** Lat $12.80^\circ - 13.10^\circ\text{N}$, Lon $75.60^\circ - 75.95^\circ\text{E}$ (UTM Zone 43N), derived strictly from `contracts/config.json`.
+- **Population Analyzed:** [N from real run] rural residents across [N cells from real run] grid cells ($300\text{m} \times 300\text{m}$).
+- **Baseline Gap:** [N from real run] unserved residents across [N gap cells from real run] modeled gap cells.
 
 ---
 
@@ -78,45 +78,45 @@
 - **Feasibility Pass/Fail Filters:**
   - **Surface Slope:** Must be $< 15.0^\circ$ (calculated from 2D DEM gradient).
   - **Road Access:** Must be $\le 1.0\text{ km}$ from OpenStreetMap verified roads (calculated via STRtree spatial index).
-- **Top 5 Ranked Shortlist:**
-  1. **CAND-09** (Anemahal Hills): **+5,269** newly covered | Road: 0.79 km | Slope: 6.0°
-  2. **CAND-07** (Ballupete Fringe): **+4,532** newly covered | Road: 0.11 km | Slope: 5.6° | Fiber along road
-  3. **CAND-02** (Donigal Valley): **+1,370** newly covered | Road: 0.17 km | Slope: 6.0° | Fiber along road
-  4. **CAND-010** (Anemahal Ridge): **+476** newly covered | Road: 0.81 km | Slope: 7.2°
-  5. **CAND-05** (Ballupete East): **+298** newly covered | Road: 0.35 km | Slope: 5.1°
-- **Overall Impact:** Top sites bring over **11,947** rural residents into reliable mobile coverage (a **61.8% gap reduction**).
+- **Prioritized Shortlist (Populated dynamically on real run):**
+  1. **[Site 1 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
+  2. **[Site 2 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
+  3. **[Site 3 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
+  4. **[Site 4 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
+  5. **[Site 5 from real run]** ([Cluster name]): **+[N from real run]** newly covered | Road: [N km] | Slope: [N°] | [Backhaul]
+- **Overall Impact:** Top sites bring **[N from real run]** rural residents into reliable mobile coverage (a **[X% from real run]** gap reduction).
 
 ---
 
 ## Slide 7: The "Needs Field Survey" Cluster
-- **Cluster CL-04 (Western Ghats Escarpment):**
-  - Population in gap: 2,840 residents.
-  - Slope: $> 18.5^\circ$ (exceeds $15^\circ$ macrocell threshold).
-  - Distance to road: $> 3.4\text{ km}$ (exceeds $1\text{ km}$ vehicular access limit).
+- **Cluster [ID from real run] ([Remote Western Ghats Escarpment]):**
+  - Population in gap: [N from real run] residents.
+  - Slope: [N° from real run] (exceeds $15^\circ$ macrocell threshold).
+  - Distance to road: [N km from real run] (exceeds $1.0\text{ km}$ vehicular road access limit).
 - **Honest Automated Failure:** The system outputs `candidate_ids: []` with an explicit alert: **"Needs Field Survey"**.
-- **Actionable Value:** Recommends off-grid solar micro-masts or localized cable relays rather than misleading planners with unbuildable macrocell coordinates.
+- **Actionable Value:** Recommends off-grid solar micro-masts, localized relays, or satellite small-cells rather than misleading planners with unbuildable macrocell coordinates.
 
 ---
 
 ## Slide 8: 3-Minute Demo Walkthrough Script
 1. **0:00 - 0:45 | Baseline Map & Unserved Numbers:**
-   - Open Map view centered on Sakleshpur.
+   - Open Map view centered on Sakleshpur Taluk.
    - Point out the 300m cells colored by signal strength.
    - Show the **MODELED DATA** badge and the **Uncertain band** (amber cells).
-   - Highlight the **19,309 unserved population counter**.
+   - Highlight the **[N from real run] unserved population counter**.
 2. **0:45 - 1:45 | Shortlist Table & Zoom:**
    - Switch to the Ranked Sites table.
-   - Click **CAND-07** (+4,532 pop covered). The map smoothly flies to the site.
-   - Point out the visible feasibility columns (Road: 0.11 km, Slope: 5.6°, Fiber backhaul).
-   - Click the **Gap Clusters** tab and highlight **CL-04 (Western Ghats Escarpment)** marked *"Needs Field Survey"*.
+   - Click top candidate (+[N from real run] pop covered). The map smoothly flies to the site.
+   - Point out the visible feasibility columns (Road distance, Slope, Backhaul).
+   - Click the **Gap Clusters** tab and highlight the cluster marked *"Needs Field Survey"*.
 3. **1:45 - 2:30 | Dynamic What-If Simulation:**
    - Grab Candidate #1 pin and drag it 1.5 km west into the valley.
-   - On drop, the FastAPI engine recalculates in **~8.6 ms**.
+   - On drop, the FastAPI engine recalculates in **[benchmark ms from real run]** (comfortably under 500 ms).
    - Show the **+Newly Covered Population** counter dynamically updating.
    - Drag it back or click **"Reset Sites"** to prove idempotent updates with zero leftover footprints.
    - Click **"Viewing: After"** to toggle before/after baseline.
 4. **2:30 - 3:00 | Printable One-Page Brief:**
-   - Click **"Generate Cluster Brief"** on Cluster CL-01.
+   - Click **"Generate Cluster Brief"** on a gap cluster.
    - Show the clean executive briefing document ready for Digital Bharat Nidhi planners.
    - Click **"Print / Save as PDF"** to demonstrate browser print formatting.
    - Close on the **Honest Limitations** slide.
@@ -124,9 +124,10 @@
 ---
 
 ## Slide 9: Transparent Limitations (Judge Q&A Defense)
-| Reviewer / Judge Question | Our Defensible Engineering Answer |
+| Honest Limit / Question | Defensible Engineering Answer |
 |---|---|
-| *Why not use standard RF software?* | Commercial suites require proprietary drive tests and antenna radiation patterns that public bodies lack. This is a triage screening tool. |
-| *How accurate is the signal prediction?* | Modeled, not measured. Academic literature reports 5 to 11 dB error in complex terrain; our $\pm 6\text{ dB}$ Uncertain band reflects this margin explicitly. |
-| *What if OpenCellID has missing towers?* | OpenCellID is treated strictly as a lower bound. Cells without evidence are labeled *Unknown*, never claimed as confirmed dead zones. |
-| *What about land ownership and power?* | Land tenure, 3-phase grid power, and fiber backhaul rights cannot be known from open data. Our output is a survey shortlist with visible flags, not a final civil engineering decision. |
+| **Modeled, Not Measured** | Signal is estimated using a standard propagation formula (Okumura-Hata) plus a 15 dB polar sweep terrain penalty, not physical drive-test measurements. |
+| **Unvalidated for Karnataka** | Published studies in other regions report propagation model errors of roughly 5 to 11 dB. We have not validated this empirically for Karnataka. Our $\pm 6\text{ dB}$ Uncertain band reflects this margin explicitly. |
+| **OpenCellID Lower Bound & Bias** | OpenCellID is crowd-sourced and biased toward highways and towns; it represents a lower bound on existing towers. Missing data is shown as *Unknown*, never claimed as a confirmed dead zone. |
+| **Survey Shortlist, Not a Siting Decision** | Land ownership, 3-phase grid power, and fiber backhaul cannot be known from open data. Output is a survey shortlist with visible flags to prioritize field teams, not a final siting decision. |
+| **Single Operator Baseline** | Operators differ in spectrum, power, and antenna azimuth. The map uses one stated frequency baseline (900 MHz) and a combined tower view, and states so openly. |
