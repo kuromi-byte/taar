@@ -16,6 +16,28 @@ from .shadow import PolarSweepEngine
 _TRANSFORMER_4326_TO_32643 = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
 
 
+class SignalArray(np.ndarray):
+    """NumPy float32 array subclass for RF signal dBm values.
+
+    Preserves NaN for unserved/out-of-range cells, while safely treating NaN as -inf
+    when evaluated with np.maximum against baseline cell signal in the API.
+    """
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if ufunc is np.maximum:
+            cleaned = [
+                np.where(np.isnan(np.asarray(x)), -np.inf, np.asarray(x))
+                if isinstance(x, (np.ndarray, list)) else x
+                for x in inputs
+            ]
+            res = getattr(ufunc, method)(*cleaned, **kwargs)
+            return np.asarray(res).view(SignalArray)
+        casted = [np.asarray(x) if isinstance(x, SignalArray) else x for x in inputs]
+        res = getattr(ufunc, method)(*casted, **kwargs)
+        if isinstance(res, np.ndarray):
+            return res.view(SignalArray)
+        return res
+
+
 def parse_cells_coords(cells: Any) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray], int]:
     """Extract UTM (x, y) coordinates and elevations from cells in various supported formats.
 
@@ -200,22 +222,22 @@ def compute_signal(
         # Update best server power (maximum across towers)
         best_signal[in_range_mask] = np.maximum(best_signal[in_range_mask], p_rx)
 
-    # Floor for unreachable cells (-140.0 dBm baseline floor)
-    best_signal[best_signal == -np.inf] = -140.0
+    # Floor for unreachable cells: set to NaN (no serving tower in range)
+    best_signal[best_signal == -np.inf] = np.nan
 
     min_dist_km = (min_dist_m / 1000.0).astype(np.float32)
-    return best_signal, min_dist_km
+    return best_signal.view(SignalArray), min_dist_km
 
 
 def classify_state(
     signal_dbm: Union[float, np.ndarray],
-    dist_to_nearest_tower_km: Union[float, np.ndarray],
+    dist_or_evidence: Union[float, np.ndarray, bool] = None,
     cfg: Optional[PropagationConfig] = None,
 ) -> Union[str, np.ndarray]:
     """Classify cell coverage state based on modeled signal, uncertain band, and unknown rule.
 
     States (lowercase, per contract):
-      - 'unknown': no tower evidence nearby (dist_to_nearest_tower_km > unknown_radius_km)
+      - 'unknown': no tower evidence (evidence False, dist > unknown_radius_km, or NaN signal)
       - 'covered': signal >= gap_threshold_dbm + uncertain_margin_db
       - 'gap': signal < gap_threshold_dbm - uncertain_margin_db
       - 'uncertain': within [gap_threshold - margin, gap_threshold + margin)
@@ -227,7 +249,6 @@ def classify_state(
         cfg = PropagationConfig()
 
     sig = np.atleast_1d(signal_dbm)
-    dist = np.atleast_1d(dist_to_nearest_tower_km)
 
     lower_bound = cfg.gap_threshold_dbm - cfg.uncertain_margin_db
     upper_bound = cfg.gap_threshold_dbm + cfg.uncertain_margin_db
@@ -241,9 +262,16 @@ def classify_state(
     # gap
     states[sig < lower_bound] = "gap"
 
-    # unknown: beyond tower evidence threshold
-    states[dist > cfg.unknown_radius_km] = "unknown"
+    # unknown: no tower evidence (boolean False), distance beyond threshold, or NaN signal
+    if dist_or_evidence is not None:
+        doe = np.atleast_1d(dist_or_evidence)
+        if doe.dtype == bool or isinstance(dist_or_evidence, (bool, np.bool_)):
+            states[~doe] = "unknown"
+        else:
+            states[(doe > cfg.unknown_radius_km) | np.isinf(doe)] = "unknown"
 
-    if isinstance(signal_dbm, (int, float)) and isinstance(dist_to_nearest_tower_km, (int, float)):
+    states[np.isnan(sig)] = "unknown"
+
+    if isinstance(signal_dbm, (int, float)) and (dist_or_evidence is None or isinstance(dist_or_evidence, (int, float, bool))):
         return str(states[0])
     return states

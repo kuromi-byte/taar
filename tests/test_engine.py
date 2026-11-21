@@ -7,38 +7,38 @@ from pipeline.model.engine import classify_state, compute_signal
 
 
 def test_classify_state_logic():
-    """Verify state classification rules: Uncertain band, gap, covered, and Unknown."""
+    """Verify state classification rules: uncertain band, gap, covered, and unknown (lowercase per contract)."""
     cfg = PropagationConfig(
-        gap_threshold_dbm=-105.0,
+        gap_threshold_dbm=-100.0,
         uncertain_margin_db=6.0,
         unknown_radius_km=15.0,
     )
-    # Threshold = -105, Margin = 6
-    # Upper bound = -99 dBm
-    # Lower bound = -111 dBm
+    # Threshold = -100, Margin = 6
+    # Upper bound = -94 dBm
+    # Lower bound = -106 dBm
 
-    # 1. Likely covered (>= -99 dBm, near tower)
-    assert classify_state(-90.0, 2.0, cfg) == "Likely covered"
-    assert classify_state(-99.0, 2.0, cfg) == "Likely covered"
+    # 1. covered (>= -94 dBm, near tower)
+    assert classify_state(-90.0, 2.0, cfg) == "covered"
+    assert classify_state(-94.0, 2.0, cfg) == "covered"
 
-    # 2. Uncertain (between -111 and -99 dBm)
-    assert classify_state(-100.0, 3.0, cfg) == "Uncertain"
-    assert classify_state(-105.0, 3.0, cfg) == "Uncertain"
-    assert classify_state(-110.9, 3.0, cfg) == "Uncertain"
+    # 2. uncertain (between -106 and -94 dBm)
+    assert classify_state(-95.0, 3.0, cfg) == "uncertain"
+    assert classify_state(-100.0, 3.0, cfg) == "uncertain"
+    assert classify_state(-105.9, 3.0, cfg) == "uncertain"
 
-    # 3. Likely gap (< -111 dBm, with tower nearby)
-    assert classify_state(-112.0, 5.0, cfg) == "Likely gap"
-    assert classify_state(-125.0, 8.0, cfg) == "Likely gap"
+    # 3. gap (< -106 dBm, with tower nearby)
+    assert classify_state(-107.0, 5.0, cfg) == "gap"
+    assert classify_state(-125.0, 8.0, cfg) == "gap"
 
-    # 4. Unknown: no tower evidence nearby (> 15 km), regardless of signal
-    assert classify_state(-125.0, 16.0, cfg) == "Unknown"
-    assert classify_state(-80.0, 20.0, cfg) == "Unknown"
+    # 4. unknown: no tower evidence nearby (> 15 km), regardless of signal
+    assert classify_state(-125.0, 16.0, cfg) == "unknown"
+    assert classify_state(-80.0, 20.0, cfg) == "unknown"
 
     # Vectorized test
-    signals = np.array([-90.0, -104.0, -115.0, -130.0])
+    signals = np.array([-90.0, -99.0, -115.0, -130.0])
     dists = np.array([2.0, 4.0, 8.0, 18.0])
     states = classify_state(signals, dists, cfg)
-    assert list(states) == ["Likely covered", "Uncertain", "Likely gap", "Unknown"]
+    assert list(states) == ["covered", "uncertain", "gap", "unknown"]
 
 
 def test_best_server_maximum():
@@ -82,4 +82,4 @@ def test_ten_kilometer_radius():
     assert dists[1] == pytest.approx(12.0, abs=0.1)
 
     assert signals[0] > -140.0, "Cell at 9 km should have modeled signal"
-    assert signals[1] == -140.0, "Cell at 12 km (> 10 km) should be floored at baseline -140 dBm"
+    assert np.isnan(signals[1]), "Cell at 12 km (> 10 km) should be NaN"
