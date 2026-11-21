@@ -4,10 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const currentDir = typeof __dirname !== 'undefined'
-  ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
-
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoContractsPath = path.resolve(currentDir, '../contracts/config.json');
 const fallbackContractsPath = path.resolve(currentDir, 'src/config/contracts-fallback.json');
 

@@ -1,5 +1,4 @@
 {
-  "_comment": "TODO-STUB: Local fallback mirroring /contracts/config.json",
   "pilot": {
     "name": "Sakleshpur",
     "district": "Hassan",
@@ -25,5 +24,13 @@
     "ray_step_m": 30.0,
     "n_rays": 720,
     "eirp_dbm": 43.0
+  },
+  "paths": {
+    "dem_raw_dir": "data/raw",
+    "dem_processed": "data/processed/dem_utm43n.tif",
+    "opencellid_csv": "data/raw/opencellid_pilot.csv",
+    "towers_json": "contracts/mock/towers.json",
+    "cells_base_geojson": "contracts/mock/cells_base.geojson",
+    "cells_out_geojson": "data/processed/cells.geojson"
   }
 }

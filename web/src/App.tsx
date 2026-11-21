@@ -40,24 +40,28 @@ export const App: React.FC = () => {
 
     // Fetch Candidates
     fetch(DATA_CONFIG.paths.candidates)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : []))
       .then((data: Candidate[]) => {
-        setCandidates(data);
-        setInitialCandidates(JSON.parse(JSON.stringify(data)));
-        // Sum initial added population
-        const sumAdded = data.reduce((acc, c) => acc + (c.added_pop || 0), 0);
-        setNewlyCoveredPop(sumAdded);
-        if (data.length > 0) setSelectedCandidateId(data[0].id);
+        if (Array.isArray(data) && data.length > 0) {
+          setCandidates(data);
+          setInitialCandidates(JSON.parse(JSON.stringify(data)));
+          // Sum initial added population
+          const sumAdded = data.reduce((acc, c) => acc + (c.added_pop || 0), 0);
+          setNewlyCoveredPop(sumAdded);
+          setSelectedCandidateId(data[0].id);
+        }
       })
       .catch((err) => console.error('Failed to load candidates:', err));
 
     // Fetch Clusters
     fetch(DATA_CONFIG.paths.clusters)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : []))
       .then((data: Cluster[]) => {
-        setClusters(data);
-        const sumUnserved = data.reduce((acc, cl) => acc + (cl.pop_in_gap || 0), 0);
-        if (sumUnserved > 0) setTotalUnservedPop(sumUnserved);
+        if (Array.isArray(data) && data.length > 0) {
+          setClusters(data);
+          const sumUnserved = data.reduce((acc, cl) => acc + (cl.pop_in_gap || 0), 0);
+          if (sumUnserved > 0) setTotalUnservedPop(sumUnserved);
+        }
       })
       .catch((err) => console.error('Failed to load clusters:', err));
   }, []);

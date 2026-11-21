@@ -3,7 +3,7 @@
 // Adapts to real schema keys (where thresholds are inside "propagation").
 // Never hard-code them. Derived map center and fitBounds are calculated dynamically.
 
-import rawConfig from '/contracts/config.json';
+import rawConfig from './contracts-fallback.json';
 import { ContractConfig } from '../types/contracts';
 
 // In the real /contracts/config.json, tunables are nested under "propagation"
