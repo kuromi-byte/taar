@@ -18,4 +18,18 @@ web/public/data/cells.geojson
 
 # Temporary files
 test_osm_towers.json
+<<<<<<< HEAD
 osm_towers.json
+=======
+
+# Web & Frontend
+**/node_modules/
+**/dist/
+node_modules/
+dist/
+web/node_modules/
+web/dist/
+.DS_Store
+*.local
+
+>>>>>>> 8d2db84474eccae6360ea642796c31c97920d011

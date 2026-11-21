@@ -1,15 +1,29 @@
 {
-  "_comment": "TODO-STUB: Local fallback until /contracts/config.json is provided by team",
-  "gap_threshold_dbm": -105,
-  "uncertain_band_db": 6,
-  "max_radius_km": 10,
+  "_comment": "TODO-STUB: Local fallback mirroring /contracts/config.json",
   "pilot": {
-    "name": "Sakleshpur Taluk (Hassan, Karnataka)",
+    "name": "Sakleshpur",
+    "district": "Hassan",
+    "state": "Karnataka",
     "bbox_wgs84": {
       "min_lon": 75.60,
       "max_lon": 75.95,
       "min_lat": 12.80,
       "max_lat": 13.10
-    }
+    },
+    "terrain_buffer_km": 10.0,
+    "crs_internal": "EPSG:32643",
+    "crs_exchange": "EPSG:4326"
+  },
+  "propagation": {
+    "frequency_mhz": 900.0,
+    "tower_height_m": 30.0,
+    "rx_height_m": 1.5,
+    "shadow_penalty_db": 15.0,
+    "gap_threshold_dbm": -100.0,
+    "uncertain_band_db": 6.0,
+    "max_radius_km": 10.0,
+    "ray_step_m": 30.0,
+    "n_rays": 720,
+    "eirp_dbm": 43.0
   }
 }
