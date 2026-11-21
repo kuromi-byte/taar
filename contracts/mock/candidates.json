@@ -1,77 +1,92 @@
 [
   {
+    "meta": {
+      "source": "mock"
+    },
     "id": "CAND-09",
     "cluster_id": "CL-03",
-    "lat": 12.978794,
-    "lon": 75.770111,
+    "lat": 12.960828,
+    "lon": 75.774295,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 5269,
+    "added_pop": 6936,
     "flags": {
-      "road_km": 0.79,
-      "slope_deg": 6.0,
-      "backhaul": "Microwave relay (survey needed)"
+      "road_km": 0.12,
+      "slope_deg": 7.9,
+      "backhaul": "Fiber along road (125m)"
     },
-    "why": "Captures 5269 unserved residents across Anemahal & Kirehalli Hills; local prominence +-0.9m over valley; gentle slope (6.0\u00b0) with direct road access (0.79 km)."
+    "why": "Captures 6,936 unserved residents in Anemahal cluster; local prominence +8.0m over valley; gentle slope (7.9\u00b0) with direct road access (0.12 km)."
   },
   {
-    "id": "CAND-07",
-    "cluster_id": "CL-02",
-    "lat": 12.943007,
-    "lon": 75.810003,
+    "meta": {
+      "source": "mock"
+    },
+    "id": "CAND-011",
+    "cluster_id": "CL-03",
+    "lat": 12.986685,
+    "lon": 75.786336,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 4532,
+    "added_pop": 4572,
     "flags": {
-      "road_km": 0.11,
-      "slope_deg": 5.6,
-      "backhaul": "Fiber along road (113m)"
+      "road_km": 0.32,
+      "slope_deg": 3.9,
+      "backhaul": "Fiber along road (316m)"
     },
-    "why": "Captures 4532 unserved residents across Ballupete South-East Fringe; local prominence +38.9m over valley; gentle slope (5.6\u00b0) with direct road access (0.11 km)."
+    "why": "Captures 4,572 unserved residents in Anemahal cluster; local prominence +15.0m over valley; gentle slope (3.9\u00b0) with direct road access (0.32 km)."
   },
   {
+    "meta": {
+      "source": "mock"
+    },
     "id": "CAND-02",
     "cluster_id": "CL-01",
-    "lat": 12.943168,
-    "lon": 75.76788,
+    "lat": 12.950251,
+    "lon": 75.755233,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 1370,
+    "added_pop": 1427,
     "flags": {
-      "road_km": 0.17,
-      "slope_deg": 6.0,
-      "backhaul": "Fiber along road (165m)"
+      "road_km": 0.58,
+      "slope_deg": 5.7,
+      "backhaul": "Microwave LoS to Sakleshpur HQ"
     },
-    "why": "Captures 1370 unserved residents across Donigal Valley & Kadagaravalli; local prominence +-31.7m over valley; gentle slope (6.0\u00b0) with direct road access (0.17 km)."
+    "why": "Captures 1,427 unserved residents in Donigal cluster; local prominence +19.1m over valley; gentle slope (5.7\u00b0) with direct road access (0.58 km)."
   },
   {
-    "id": "CAND-010",
-    "cluster_id": "CL-03",
-    "lat": 12.980593,
-    "lon": 75.773344,
-    "height": 30.0,
-    "power": 43.0,
-    "added_pop": 476,
-    "flags": {
-      "road_km": 0.85,
-      "slope_deg": 4.2,
-      "backhaul": "Microwave relay (survey needed)"
+    "meta": {
+      "source": "mock"
     },
-    "why": "Captures 476 unserved residents across Anemahal & Kirehalli Hills; local prominence +-22.7m over valley; gentle slope (4.2\u00b0) with direct road access (0.85 km)."
-  },
-  {
     "id": "CAND-05",
-    "cluster_id": "CL-02",
-    "lat": 12.940286,
-    "lon": 75.812759,
+    "cluster_id": "CL-01",
+    "lat": 12.945747,
+    "lon": 75.749228,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 298,
+    "added_pop": 708,
     "flags": {
-      "road_km": 0.16,
-      "slope_deg": 3.9,
-      "backhaul": "Fiber along road (162m)"
+      "road_km": 0.21,
+      "slope_deg": 11.8,
+      "backhaul": "Fiber along road (207m)"
     },
-    "why": "Captures 298 unserved residents across Ballupete South-East Fringe; local prominence +16.5m over valley; gentle slope (3.9\u00b0) with direct road access (0.16 km)."
+    "why": "Captures 708 unserved residents in Donigal cluster; local prominence +18.5m over valley; gentle slope (11.8\u00b0) with direct road access (0.21 km)."
+  },
+  {
+    "meta": {
+      "source": "mock"
+    },
+    "id": "CAND-08",
+    "cluster_id": "CL-03",
+    "lat": 12.966721,
+    "lon": 75.769243,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 584,
+    "flags": {
+      "road_km": 0.62,
+      "slope_deg": 0.3,
+      "backhaul": "Microwave LoS to Sakleshpur HQ"
+    },
+    "why": "Captures 584 unserved residents in Anemahal cluster; local prominence +-1.3m over valley; gentle slope (0.3\u00b0) with direct road access (0.62 km)."
   }
 ]
