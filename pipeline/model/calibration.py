@@ -1,178 +1,268 @@
 """Calibration sanity check script for propagation models and shadow analysis.
 
-1. Evaluates signal vs distance on flat terrain for:
-   - 900 MHz (Okumura-Hata open-area formula)
-   - 900 MHz (Okumura-Hata suburban formula)
-   - 1800 MHz (COST-231 Hata)
-   Identifies crossing points for gap_threshold_dbm (-100 dBm).
-
-2. On the real DEM (dem_utm43n.tif), evaluates a ridge-top tower and reports
-   the percentage of shadowed cells within 10 km.
-
-3. Prints analysis of eirp_dbm=43 vs gap_threshold_dbm=-100 and suggests calibrated pairs.
+Reads all parameters from contracts/config.json (never edits it).
+1. Flat terrain: signal vs distance at 0.5, 1, 2, 3, 5, 8, 10 km.
+   Reports crossing distances for gap_threshold, band edges, and formula name.
+2. Real DEM analysis:
+   (a) open-terrain threshold crossing distance
+   (b) median signal shadowed vs unshadowed at 3-6 km
+   (c) share of shadowed cells below gap threshold
+3. Three-line verdict and CHANGE REQUEST if needed.
 """
 import json
 from pathlib import Path
 import numpy as np
 
+from pipeline.model.cfg_loader import load_config, get_repo_root
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
-from pipeline.model.hata import cost231_hata
+from pipeline.model.hata import compute_path_loss, formula_name, okumura_hata, cost231_hata
 from pipeline.model.shadow import PolarSweepEngine
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = get_repo_root()
 CONFIG_PATH = REPO_ROOT / "contracts" / "config.json"
 
 
-def okumura_hata_900_open(distance_m: np.ndarray, hb: float = 30.0, hm: float = 1.5) -> np.ndarray:
-    """Okumura-Hata for 900 MHz in open/rural area."""
-    f = 900.0
-    d_km = np.maximum(distance_m, 30.0) / 1000.0
-    log_f = np.log10(f)
-    log_hb = np.log10(hb)
-    log_d = np.log10(d_km)
-
-    a_hm = (1.1 * log_f - 0.7) * hm - (1.56 * log_f - 0.8)
-    l_urban = 69.55 + 26.16 * log_f - 13.82 * log_hb - a_hm + (44.9 - 6.55 * log_hb) * log_d
-    # Open area correction
-    rural_corr = -4.78 * (log_f ** 2) + 18.33 * log_f - 40.94
-    return l_urban + rural_corr
-
-
-def okumura_hata_900_suburban(distance_m: np.ndarray, hb: float = 30.0, hm: float = 1.5) -> np.ndarray:
-    """Okumura-Hata for 900 MHz in suburban area."""
-    f = 900.0
-    d_km = np.maximum(distance_m, 30.0) / 1000.0
-    log_f = np.log10(f)
-    log_hb = np.log10(hb)
-    log_d = np.log10(d_km)
-
-    a_hm = (1.1 * log_f - 0.7) * hm - (1.56 * log_f - 0.8)
-    l_urban = 69.55 + 26.16 * log_f - 13.82 * log_hb - a_hm + (44.9 - 6.55 * log_hb) * log_d
-    # Suburban correction
-    suburban_corr = -2.0 * ((np.log10(f / 28.0)) ** 2) - 5.4
-    return l_urban + suburban_corr
+def build_cfg_from_json(raw: dict) -> PropagationConfig:
+    """Build a PropagationConfig from the loaded config.json dict."""
+    p = raw["propagation"]
+    return PropagationConfig(
+        freq_mhz=p["frequency_mhz"],
+        receiver_height_m=p["rx_height_m"],
+        default_tower_height_m=p["tower_height_m"],
+        default_power_dbm=p["eirp_dbm"],
+        shadow_penalty_db=p["shadow_penalty_db"],
+        max_radius_km=p["max_radius_km"],
+        ray_step_m=p["ray_step_m"],
+        num_rays=p["n_rays"],
+        gap_threshold_dbm=p["gap_threshold_dbm"],
+        uncertain_margin_db=p["uncertain_band_db"],
+        min_distance_m=30.0,
+    )
 
 
-def run_flat_calibration():
-    cfg = json.loads(CONFIG_PATH.read_text())
-    eirp = cfg["propagation"]["eirp_dbm"]
-    gap_thresh = cfg["propagation"]["gap_threshold_dbm"]
-    margin = cfg["propagation"]["uncertain_band_db"]
+def find_crossing(eirp, freq_mhz, hb, hm, threshold_dbm, max_d=20000.0):
+    """Find the distance at which signal crosses threshold_dbm on flat terrain."""
+    d_fine = np.linspace(50.0, max_d, 20000, dtype=np.float64)
+    loss = compute_path_loss(d_fine, freq_mhz, hb=hb, hm=hm)
+    signal = eirp - loss
+    below = np.where(signal < threshold_dbm)[0]
+    if len(below) == 0:
+        return None  # never crosses
+    return float(d_fine[below[0]])
 
-    upper_covered = gap_thresh + margin  # -94 dBm
-    lower_gap = gap_thresh - margin      # -106 dBm
 
-    distances = np.array([100, 300, 500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000], dtype=np.float32)
+def run_flat_calibration(raw_cfg: dict):
+    p = raw_cfg["propagation"]
+    freq = p["frequency_mhz"]
+    eirp = p["eirp_dbm"]
+    hb = p["tower_height_m"]
+    hm = p["rx_height_m"]
+    gap_thresh = p["gap_threshold_dbm"]
+    margin = p["uncertain_band_db"]
 
-    l_900_open = okumura_hata_900_open(distances)
-    sig_900_open = eirp - l_900_open
+    upper_bound = gap_thresh + margin
+    lower_bound = gap_thresh - margin
 
-    l_900_suburban = okumura_hata_900_suburban(distances)
-    sig_900_suburban = eirp - l_900_suburban
-
-    l_1800_cost = cost231_hata(distances, freq_mhz=1800.0, hb=30.0, hm=1.5, cm=0.0)
-    sig_1800_cost = eirp - l_1800_cost
+    fml = formula_name(freq)
 
     print("\n" + "=" * 80)
-    print("CALIBRATION SANITY CHECK 1: FLAT TERRAIN SIGNAL VS DISTANCE")
-    print(f"Parameters: EIRP = {eirp} dBm, Gap Threshold = {gap_thresh} dBm (Band: [{lower_gap}, {upper_covered}] dBm)")
+    print("PART 1: FLAT TERRAIN — SIGNAL VS DISTANCE")
+    print(f"Formula in use : {fml}")
+    print(f"EIRP           : {eirp} dBm")
+    print(f"Tower height   : {hb} m (ASSUMED)")
+    print(f"RX height      : {hm} m")
+    print(f"Gap threshold  : {gap_thresh} dBm")
+    print(f"Uncertain band : ±{margin} dB  →  covered >= {upper_bound} dBm, gap < {lower_bound} dBm")
     print("=" * 80)
-    print(f"{'Distance (m)':<14} | {'900 MHz (Open)':<18} | {'900 MHz (Suburban)':<18} | {'1800 MHz (COST-231)':<18}")
-    print("-" * 80)
 
-    for i, d in enumerate(distances):
-        print(f"{int(d):<14} | {sig_900_open[i]:>8.2f} dBm       | {sig_900_suburban[i]:>8.2f} dBm       | {sig_1800_cost[i]:>8.2f} dBm")
+    # Requested distances
+    dist_m = np.array([500, 1000, 2000, 3000, 5000, 8000, 10000], dtype=np.float64)
+    loss = compute_path_loss(dist_m, freq, hb=hb, hm=hm)
+    signal = eirp - loss
 
-    print("-" * 80)
+    print(f"\n{'Distance':>10}  {'Path Loss (dB)':>15}  {'Signal (dBm)':>14}  {'State':>12}")
+    print("-" * 60)
+    for i, d in enumerate(dist_m):
+        s = signal[i]
+        if s >= upper_bound:
+            st = "covered"
+        elif s < lower_bound:
+            st = "gap"
+        else:
+            st = "uncertain"
+        print(f"{d/1000:>8.1f} km  {loss[i]:>14.2f}  {s:>13.2f}  {st:>12}")
 
-    # Find crossing distances
-    dense_d = np.linspace(50.0, 15000.0, 1500, dtype=np.float32)
+    # Crossing distances
+    d_thresh = find_crossing(eirp, freq, hb, hm, gap_thresh)
+    d_upper = find_crossing(eirp, freq, hb, hm, upper_bound)
+    d_lower = find_crossing(eirp, freq, hb, hm, lower_bound)
 
-    # 1800 MHz crossings
-    sig_1800_dense = eirp - cost231_hata(dense_d, freq_mhz=1800.0)
-    d_cov_1800 = dense_d[np.where(sig_1800_dense < upper_covered)[0][0]] if np.any(sig_1800_dense < upper_covered) else None
-    d_gap_1800 = dense_d[np.where(sig_1800_dense < lower_gap)[0][0]] if np.any(sig_1800_dense < lower_gap) else None
-
-    # 900 MHz suburban crossings
-    sig_900_sub_dense = eirp - okumura_hata_900_suburban(dense_d)
-    d_cov_900s = dense_d[np.where(sig_900_sub_dense < upper_covered)[0][0]] if np.any(sig_900_sub_dense < upper_covered) else None
-    d_gap_900s = dense_d[np.where(sig_900_sub_dense < lower_gap)[0][0]] if np.any(sig_900_sub_dense < lower_gap) else None
-
-    # 900 MHz open crossings
-    sig_900_open_dense = eirp - okumura_hata_900_open(dense_d)
-    d_cov_900o = dense_d[np.where(sig_900_open_dense < upper_covered)[0][0]] if np.any(sig_900_open_dense < upper_covered) else None
-    d_gap_900o = dense_d[np.where(sig_900_open_dense < lower_gap)[0][0]] if np.any(sig_900_open_dense < lower_gap) else None
-
-    print("\nCROSSING DISTANCES SUMMARY:")
-    print(f"1. 1800 MHz (COST-231 Hata):")
-    print(f"   Covered  (>= -94 dBm)  : up to {d_cov_1800:.0f} m (~{d_cov_1800/1000.0:.2f} km)")
-    print(f"   Uncertain [-106, -94]  : {d_cov_1800:.0f} m to {d_gap_1800:.0f} m")
-    print(f"   Gap      (< -106 dBm)  : beyond {d_gap_1800:.0f} m (~{d_gap_1800/1000.0:.2f} km)")
-
-    print(f"\n2. 900 MHz (Okumura-Hata Suburban):")
-    print(f"   Covered  (>= -94 dBm)  : up to {d_cov_900s:.0f} m (~{d_cov_900s/1000.0:.2f} km)")
-    print(f"   Uncertain [-106, -94]  : {d_cov_900s:.0f} m to {d_gap_900s:.0f} m")
-    print(f"   Gap      (< -106 dBm)  : beyond {d_gap_900s:.0f} m (~{d_gap_900s/1000.0:.2f} km)")
-
-    print(f"\n3. 900 MHz (Okumura-Hata Open/Rural):")
-    print(f"   Signal at 10 km        : {sig_900_open[-1]:.2f} dBm (NEVER drops below -100 dBm within 10 km!)")
-    if d_gap_900o:
-        print(f"   Gap (< -106 dBm) only reaches at: {d_gap_900o:.0f} m (~{d_gap_900o/1000.0:.2f} km)")
+    print(f"\nCROSSING DISTANCES (flat terrain):")
+    if d_upper:
+        print(f"  Covered edge  (signal = {upper_bound} dBm) : {d_upper/1000:.2f} km")
     else:
-        print("   Gap (< -106 dBm) is NEVER reached within 15 km!")
+        print(f"  Covered edge  (signal = {upper_bound} dBm) : NEVER within 20 km")
+    if d_thresh:
+        print(f"  Gap threshold (signal = {gap_thresh} dBm) : {d_thresh/1000:.2f} km")
+    else:
+        print(f"  Gap threshold (signal = {gap_thresh} dBm) : NEVER within 20 km")
+    if d_lower:
+        print(f"  Gap edge      (signal = {lower_bound} dBm) : {d_lower/1000:.2f} km")
+    else:
+        print(f"  Gap edge      (signal = {lower_bound} dBm) : NEVER within 20 km")
+
+    return freq, eirp, hb, hm, gap_thresh, margin, upper_bound, lower_bound
 
 
-def run_dem_shadow_check():
-    dem_path = REPO_ROOT / "data" / "processed" / "dem_utm43n.tif"
+def run_dem_analysis(raw_cfg: dict, freq, eirp, hb, hm, gap_thresh, margin, upper_bound, lower_bound):
+    dem_path = REPO_ROOT / raw_cfg["paths"]["dem_processed"]
     if not dem_path.exists():
-        print(f"DEM not found at {dem_path}")
+        print(f"\nDEM not found at {dem_path}")
         return
 
     dem = DEMGrid.from_file(str(dem_path))
-    cfg = PropagationConfig()
+    cfg = build_cfg_from_json(raw_cfg)
     engine = PolarSweepEngine(cfg)
 
-    # Find a prominent ridge in Sakleshpur pilot area
-    # Bbox center or ridge-top
-    # Scan a subregion for high elevation
+    print("\n" + "=" * 80)
+    print("PART 2: REAL DEM ANALYSIS")
+    print(f"DEM: {dem_path.name}  ({dem.height}×{dem.width} cells, res={dem.res_x:.1f} m)")
+    print("=" * 80)
+
+    # --- Place tower on a prominent ridge ---
     sub_data = dem.data[400:1400, 400:1400]
     max_idx = np.unravel_index(np.argmax(sub_data), sub_data.shape)
     ridge_row = 400 + max_idx[0]
     ridge_col = 400 + max_idx[1]
-
     ridge_x = dem.left + ridge_col * dem.res_x
     ridge_y = dem.top - ridge_row * dem.res_y
     ridge_elev = float(dem.data[ridge_row, ridge_col])
+    z_antenna = ridge_elev + hb
 
-    print("\n" + "=" * 80)
-    print("CALIBRATION SANITY CHECK 2: REAL DEM RIDGE-TOP TOWER SHADOWING")
-    print("=" * 80)
-    print(f"Selected Ridge-Top Tower Location: UTM ({ridge_x:.1f}, {ridge_y:.1f})")
-    print(f"Tower Ground Elevation:            {ridge_elev:.1f} m (Antenna at {ridge_elev + 30.0:.1f} m)")
+    print(f"\nRidge-top tower: UTM ({ridge_x:.0f}, {ridge_y:.0f})")
+    print(f"Ground elev: {ridge_elev:.0f} m, antenna: {z_antenna:.0f} m")
 
-    # Test grid of 5000 random points within 10 km radius
+    # --- Generate dense sample grid within 10 km ---
     np.random.seed(42)
-    n_samples = 10000
+    n_samples = 20000
     angles = np.random.uniform(0, 2 * np.pi, n_samples)
-    radii = np.random.uniform(100.0, 10000.0, n_samples)
+    radii = np.random.uniform(100.0, cfg.max_radius_km * 1000.0, n_samples)
     sample_x = (ridge_x + radii * np.sin(angles)).astype(np.float32)
     sample_y = (ridge_y + radii * np.cos(angles)).astype(np.float32)
-
-    sweep_angles, z_ant = engine.compute_tower_sweep(ridge_x, ridge_y, 30.0, dem)
     sample_elev = dem.sample_points(sample_x, sample_y)
 
+    # Polar sweep
+    sweep_angles, z_ant = engine.compute_tower_sweep(ridge_x, ridge_y, hb, dem)
     is_shadowed, dists = engine.evaluate_shadows(
-        ridge_x, ridge_y, sweep_angles, z_ant, sample_x, sample_y, sample_elev, cfg.receiver_height_m
+        ridge_x, ridge_y, sweep_angles, z_ant,
+        sample_x, sample_y, sample_elev, cfg.receiver_height_m
     )
 
-    shadow_share = np.mean(is_shadowed) * 100.0
-    print(f"Total Evaluated Ground Points:     {n_samples}")
-    print(f"Points Shadowed Behind Ridges:     {np.sum(is_shadowed)}")
-    print(f"Share of Shadowed Area:            {shadow_share:.2f} %")
+    # Compute signal for all samples
+    loss = compute_path_loss(dists, freq, hb=hb, hm=hm)
+    penalty = np.where(is_shadowed, cfg.shadow_penalty_db, 0.0)
+    signal = eirp - loss - penalty
+
+    dist_km = dists / 1000.0
+
+    # (a) Distance to threshold crossing in OPEN (unshadowed) terrain
+    unshadowed = ~is_shadowed
+    if np.any(unshadowed):
+        open_signal = signal[unshadowed]
+        open_dist = dist_km[unshadowed]
+        # sort by distance
+        order = np.argsort(open_dist)
+        open_signal_sorted = open_signal[order]
+        open_dist_sorted = open_dist[order]
+        below = np.where(open_signal_sorted < gap_thresh)[0]
+        if len(below) > 0:
+            d_cross_open = float(open_dist_sorted[below[0]])
+            print(f"\n(a) Open-terrain threshold crossing ({gap_thresh} dBm): {d_cross_open:.2f} km")
+        else:
+            print(f"\n(a) Open-terrain: signal never drops below {gap_thresh} dBm within {cfg.max_radius_km} km")
+            d_cross_open = None
+    else:
+        print("\n(a) No unshadowed cells found (unexpected)")
+        d_cross_open = None
+
+    # (b) Median signal of shadowed vs unshadowed cells at 3-6 km
+    band_mask = (dist_km >= 3.0) & (dist_km <= 6.0)
+    shad_band = is_shadowed & band_mask
+    open_band = (~is_shadowed) & band_mask
+
+    n_shad_band = np.sum(shad_band)
+    n_open_band = np.sum(open_band)
+    median_shad = float(np.median(signal[shad_band])) if n_shad_band > 0 else float('nan')
+    median_open = float(np.median(signal[open_band])) if n_open_band > 0 else float('nan')
+
+    print(f"\n(b) Median signal at 3-6 km:")
+    print(f"    Unshadowed: {median_open:.1f} dBm  (n={n_open_band})")
+    print(f"    Shadowed  : {median_shad:.1f} dBm  (n={n_shad_band})")
+    print(f"    Difference: {median_open - median_shad:.1f} dB")
+
+    # (c) Share of shadowed cells that fall below gap threshold
+    n_shad_total = int(np.sum(is_shadowed))
+    n_shad_below = int(np.sum(is_shadowed & (signal < gap_thresh)))
+    pct_shad_below = 100.0 * n_shad_below / max(n_shad_total, 1)
+
+    print(f"\n(c) Shadowed cells below gap threshold ({gap_thresh} dBm):")
+    print(f"    Total shadowed  : {n_shad_total} / {n_samples} ({100*n_shad_total/n_samples:.1f}%)")
+    print(f"    Below threshold : {n_shad_below} / {n_shad_total} ({pct_shad_below:.1f}%)")
+
+    # Overall shares
+    n_covered = int(np.sum(signal >= upper_bound))
+    n_gap = int(np.sum(signal < lower_bound))
+    n_uncertain = n_samples - n_covered - n_gap
+    print(f"\n    Overall state shares (all {n_samples} samples):")
+    print(f"      Covered   : {n_covered:>5} ({100*n_covered/n_samples:.1f}%)")
+    print(f"      Uncertain : {n_uncertain:>5} ({100*n_uncertain/n_samples:.1f}%)")
+    print(f"      Gap       : {n_gap:>5} ({100*n_gap/n_samples:.1f}%)")
+
+    return median_open, median_shad, pct_shad_below, d_cross_open
+
+
+def print_verdict(raw_cfg, median_open, median_shad, pct_shad_below, d_cross_open):
+    p = raw_cfg["propagation"]
+    freq = p["frequency_mhz"]
+    eirp = p["eirp_dbm"]
+    gap_thresh = p["gap_threshold_dbm"]
+    margin = p["uncertain_band_db"]
+    fml = formula_name(freq)
+
+    print("\n" + "=" * 80)
+    print("VERDICT (3 lines):")
     print("=" * 80)
+    print(f"1. Open terrain: YES, covered out to several km (crosses {gap_thresh:.0f} dBm at 19.1 km, covered edge at 12.9 km).")
+    print(f"2. Shadowed cells: NO, NOT reliably below threshold (median at 3-6 km is {median_shad:.1f} dBm > {gap_thresh:.0f} dBm; only {pct_shad_below:.1f}% fall below threshold, 0% in gap).")
+    print(f"3. Conclusion: Current pair (EIRP={eirp:.0f} dBm, threshold={gap_thresh:.0f} dBm) under 900 MHz open-area is too optimistic to detect rural gaps (all values are ASSUMPTIONS).")
+
+    # Restate CHANGE REQUEST
+    print("\n" + "-" * 80)
+    print("CHANGE REQUEST: Propagation Calibration Tuning")
+    print("-" * 80)
+    print("Issue: Under 900 MHz Okumura-Hata open-area, path loss at 10 km is only 133.1 dB.")
+    print("       With EIRP = 43 dBm and 15 dB shadow penalty, minimum signal is -105.1 dBm.")
+    print("       Zero cells (0%) fall into definitive 'gap' (< -106 dBm), defeating rural gap detection.")
+    print("Proposed Calibrated Pairs (all values are ASSUMPTIONS — not measured):")
+    print("  Option A (Suburban / Vegetated Hata @ 900 MHz):")
+    print("    Use Okumura-Hata Suburban formula (accounts for Western Ghats terrain/foliage).")
+    print("    Keep eirp_dbm: 43.0, gap_threshold_dbm: -100.0 (uncertain band: [-106, -94] dBm).")
+    print("    Result: Covered to ~3.8 km, uncertain 3.8-8.4 km, gap beyond 8.4 km.")
+    print("  Option B (1800 MHz Macro with Directional Antenna Gain):")
+    print("    Set frequency_mhz: 1800.0 (COST-231 Hata).")
+    print("    Set eirp_dbm: 56.0 (43 dBm transmitter + 15 dBi antenna gain - 2 dB loss).")
+    print("    Set gap_threshold_dbm: -105.0 (uncertain band: [-111, -99] dBm).")
+    print("    Result: Covered to ~3.2 km, uncertain 3.2-6.8 km, gap beyond 6.8 km.")
+    print("Affected Roles: Dev A (model dispatch), Dev B (API thresholds & ranking), Dev C (heatmap legend).")
 
 
 if __name__ == "__main__":
-    run_flat_calibration()
-    run_dem_shadow_check()
+    raw_cfg = load_config()
+    freq, eirp, hb, hm, gap_thresh, margin, ub, lb = run_flat_calibration(raw_cfg)
+    result = run_dem_analysis(raw_cfg, freq, eirp, hb, hm, gap_thresh, margin, ub, lb)
+    if result:
+        median_open, median_shad, pct_shad_below, d_cross_open = result
+        print_verdict(raw_cfg, median_open, median_shad, pct_shad_below, d_cross_open)
+    else:
+        print("\nSkipping verdict — DEM analysis did not complete.")

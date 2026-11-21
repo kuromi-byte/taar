@@ -9,7 +9,7 @@ import numpy as np
 from pyproj import Transformer
 from .config import PropagationConfig
 from .dem import DEMGrid
-from .hata import cost231_hata
+from .hata import compute_path_loss
 from .shadow import PolarSweepEngine
 
 # Fast cached transformer WGS84 -> UTM Zone 43N
@@ -182,13 +182,12 @@ def compute_signal(
             tw_x, tw_y, sweep_angles, z_antenna, sub_x, sub_y, sub_elev, cfg.receiver_height_m
         )
 
-        # Calculate COST-231 Hata path loss
-        path_loss = cost231_hata(
+        # Dispatch to correct path-loss model by frequency
+        path_loss = compute_path_loss(
             distance_m=sub_dist,
             freq_mhz=cfg.freq_mhz,
             hb=tw_h,
             hm=cfg.receiver_height_m,
-            cm=0.0,
             min_dist_m=cfg.min_distance_m,
         )
 
@@ -215,11 +214,11 @@ def classify_state(
 ) -> Union[str, np.ndarray]:
     """Classify cell coverage state based on modeled signal, uncertain band, and unknown rule.
 
-    States:
-      - 'Unknown': no tower evidence nearby (dist_to_nearest_tower_km > unknown_radius_km)
-      - 'Likely covered': signal >= gap_threshold_dbm + uncertain_margin_db
-      - 'Likely gap': signal < gap_threshold_dbm - uncertain_margin_db
-      - 'Uncertain': within [gap_threshold - margin, gap_threshold + margin)
+    States (lowercase, per contract):
+      - 'unknown': no tower evidence nearby (dist_to_nearest_tower_km > unknown_radius_km)
+      - 'covered': signal >= gap_threshold_dbm + uncertain_margin_db
+      - 'gap': signal < gap_threshold_dbm - uncertain_margin_db
+      - 'uncertain': within [gap_threshold - margin, gap_threshold + margin)
 
     Returns:
         Array of strings (or single string if input was scalar).
@@ -233,17 +232,17 @@ def classify_state(
     lower_bound = cfg.gap_threshold_dbm - cfg.uncertain_margin_db
     upper_bound = cfg.gap_threshold_dbm + cfg.uncertain_margin_db
 
-    # Default state is Uncertain
-    states = np.full(sig.shape, "Uncertain", dtype=object)
+    # Default state is uncertain
+    states = np.full(sig.shape, "uncertain", dtype=object)
 
-    # Likely covered
-    states[sig >= upper_bound] = "Likely covered"
+    # covered
+    states[sig >= upper_bound] = "covered"
 
-    # Likely gap
-    states[sig < lower_bound] = "Likely gap"
+    # gap
+    states[sig < lower_bound] = "gap"
 
-    # Unknown: beyond tower evidence threshold
-    states[dist > cfg.unknown_radius_km] = "Unknown"
+    # unknown: beyond tower evidence threshold
+    states[dist > cfg.unknown_radius_km] = "unknown"
 
     if isinstance(signal_dbm, (int, float)) and isinstance(dist_to_nearest_tower_km, (int, float)):
         return str(states[0])
