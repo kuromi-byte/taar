@@ -95,6 +95,9 @@ export const CoverageMap: React.FC<MapProps> = ({
       });
 
       mapRef.current = map;
+      if (import.meta.env.DEV) {
+        (window as any).__map = map;
+      }
 
       // Expose console helper for testing feature state
       (window as any).testRecolorCell = (cellId: number = 0, dbm: number = -75.0) => {
