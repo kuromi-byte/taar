@@ -106,6 +106,16 @@ def build_real_cells(pop_threshold: float = 1.0) -> dict:
     roads_tree = STRtree(utm_lines)
     print(f"Built STRtree with {len(utm_lines)} road line segments.")
 
+    # Load Towers for tower_evidence
+    towers_path = REPO_ROOT / "contracts" / "mock" / "towers.json"
+    tower_coords_utm = []
+    if towers_path.exists():
+        with open(towers_path, "r", encoding="utf-8") as f:
+            towers_data = json.load(f)
+        for t in towers_data:
+            tx, ty = trans_wgs_to_utm.transform(float(t["lon"]), float(t["lat"]))
+            tower_coords_utm.append((tx, ty))
+
     features = []
     cell_id = 1
     retained_pop = 0.0
@@ -152,6 +162,13 @@ def build_real_cells(pop_threshold: float = 1.0) -> dict:
                 elev = 0.0
                 slope = 0.0
 
+            # Tower evidence: cell within 15 km of known tower observation
+            if tower_coords_utm:
+                min_t_dist = min(math.hypot(cx - tx, cy - ty) for tx, ty in tower_coords_utm)
+                has_tower_ev = bool(min_t_dist <= 15000.0)
+            else:
+                has_tower_ev = True
+
             poly_coords = [
                 [round(lon_left, 6), round(lat_bottom, 6)],
                 [round(lon_right, 6), round(lat_bottom, 6)],
@@ -168,6 +185,7 @@ def build_real_cells(pop_threshold: float = 1.0) -> dict:
                 "cy": round(float(cy), 2),
                 "elev_m": round(float(elev), 1),
                 "slope_deg": round(float(slope), 1),
+                "tower_evidence": has_tower_ev,
                 "poly_coords": poly_coords,
             })
             utm_points.append(Point(cx, cy))
@@ -194,7 +212,7 @@ def build_real_cells(pop_threshold: float = 1.0) -> dict:
                 "elev_m": meta["elev_m"],
                 "slope_deg": meta["slope_deg"],
                 "road_km": dist_km,
-                "tower_evidence": "TODO-STUB",
+                "tower_evidence": meta["tower_evidence"],
             },
         })
 
