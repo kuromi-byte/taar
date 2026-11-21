@@ -1,0 +1,15 @@
+{
+  "_comment": "TODO-STUB: Local fallback until /contracts/config.json is provided by team",
+  "gap_threshold_dbm": -105,
+  "uncertain_band_db": 6,
+  "max_radius_km": 10,
+  "pilot": {
+    "name": "Sakleshpur Taluk (Hassan, Karnataka)",
+    "bbox_wgs84": {
+      "min_lon": 75.60,
+      "max_lon": 75.95,
+      "min_lat": 12.80,
+      "max_lat": 13.10
+    }
+  }
+}
