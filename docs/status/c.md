@@ -1,18 +1,20 @@
 # Dev C (Frontend) Status - Gap-to-Brief
 
 ## Done
-- **Task 1: Project Scaffolding & Configuration**
-  - Scaffolded React 18 + Vite + TypeScript inside `/web`.
-  - Configured plain `maplibre-gl` running on a 100% offline blank dark background (no CDN styles, no tiles, no font glyph network requests).
-  - Pulled shared contracts and mock files from remote (`contracts/config.json`, `contracts/mock/cells_base.geojson`, `contracts/mock/towers.json`, `web/public/data/cells.geojson`).
-  - Adapted `web/src/config/params.ts` to real `contracts/config.json` key structure (thresholds nested under `propagation`: `gap_threshold_dbm = -100.0`, `uncertain_band_db = 6.0`, `max_radius_km = 10.0`).
-  - Derived map center (`[75.775, 12.95]`) and bounds dynamically from `pilot.bbox_wgs84`.
-  - Validated spatial bounds: All 900 features in `web/public/data/cells.geojson` and all towers in `towers.json` strictly reside inside the Sakleshpur bounding box `[75.60, 12.80, 75.95, 13.10]`.
-  - Untracked `node_modules` and `dist` from git repository and updated `.gitignore`.
-  - Passing Vitest tests and production build.
+- **Upstream Merge & Conflict Resolution**:
+  - Base version: `origin/main` (commit `dbd5478`).
+  - Integrated Dev B's full frontend implementation (Map, shortlist, draggable pins, counter panel, brief and limitations modals). Clean merge with 0 unresolved git conflicts.
+- **Rules Audit & Fixes (Committed in 3 focused commits)**:
+  - *Audit Fix 1 (`9d15747`)*: Extracted pure, idempotent `applyRecompute(map, prevIdSet, changed)` into `web/src/utils/recompute.ts` with 6 Vitest unit tests covering shrinking responses, empty responses, invalid IDs, and double-drag stale footprint elimination.
+  - *Audit Fix 2 (`646fb7f`)*: In `Map.tsx`, removed hardcoded signal numbers (-94 / -106 dBm) and bound color stops dynamically to `params.gap_threshold_dbm` ± `params.uncertain_band_db`. Added explicit grey (`#6b7280`) color mapping for `unknown` / `Unknown` states (never shown as gaps). Added dev recolor button (`testRecolorCell`).
+  - *Audit Fix 3 (`ec158df`)*: Updated persistent badge to exact phrase `"Modeled, not measured"`. Added red sticky `"MOCK DATA"` banner triggered when `cells.geojson` has `meta.source == "mock"`. Implemented exact `/recompute` request payload `{"towers": [{"lat", "lon", "height_m", "power_dbm"}]}`. Handled API failure by displaying clear error message while preserving previous map state. Added candidate site inspector card with `height_m` and `power_dbm` sliders.
+- **Offline & Performance Verification**:
+  - Zero external CDN, font, or tile requests (100% offline localhost).
+  - Benchmarked `applyRecompute` over all 900 cells: executes in < 5 ms in the browser runtime.
+  - Vitest suite: 12/12 unit tests passing. Production build clean in 3.04s.
 
 ## In Progress
-- Ready to execute **Task 2: Load cells.geojson with feature-state color expression and legend**.
+- End-to-end integration with live FastAPI server on port 8000.
 
 ## Assumptions
 - Pilot area is **Sakleshpur Taluk** (Hassan District, Western Ghats, Karnataka).
@@ -24,5 +26,6 @@
 ## INTEGRATION TODO
 - [x] Dev B: `/contracts/config.json` received. `params.ts` adapted to `propagation` object.
 - [x] Dev A & B: `web/public/data/cells.geojson` verified (900 features, integer IDs, WGS84 polygons within Sakleshpur box).
-- [ ] Dev B: Candidate ranking and `POST /recompute` endpoint integration.
-- [ ] Dev D: When basemap GeoJSON (`boundary.geojson`, `roads.geojson`) and `towns.json` are placed in `/web/public/data/`, verify layer order and labels.
+- [x] Dev B: Draggable candidate markers and shortlist table wired with click-to-zoom and briefing generator.
+- [x] Dev C: Idempotent `applyRecompute` pure function and test suite verified.
+- [ ] Dev B: Run FastAPI backend concurrently (`uvicorn api.main:app --port 8000`) for live multi-tower what-if testing.
