@@ -7,12 +7,14 @@ Produces:
 - /data/processed/cells.geojson (baseline with baseline_dbm and state)
 """
 import json
+from pathlib import Path
 import numpy as np
 from pyproj import Transformer
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
 from pipeline.model.engine import compute_signal, classify_state
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 transformer_utm_to_wgs = Transformer.from_crs("EPSG:32643", "EPSG:4326", always_xy=True)
 transformer_wgs_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
 
@@ -31,17 +33,19 @@ def generate_mock_data():
     ]
 
     # Save /contracts/mock/towers.json
-    with open("d:/taar/contracts/mock/towers.json", "w") as f:
+    towers_out = _REPO_ROOT / "contracts" / "mock" / "towers.json"
+    with open(towers_out, "w") as f:
         json.dump(towers_data, f, indent=2)
-    print("Created d:/taar/contracts/mock/towers.json")
+    print(f"Created {towers_out}")
 
     # 2. Raw OpenCellID CSV: data/raw/opencellid_pilot.csv
     csv_lines = ["radio,mcc,net,area,cell,unit,lon,lat,range,samples,changeable,created,updated,averageSignal"]
     for i, t in enumerate(towers_data):
         csv_lines.append(f"LTE,404,45,1024,{10000 + i},0,{t['lon']:.6f},{t['lat']:.6f},2500,120,1,1600000000,1650000000,-85")
-    with open("d:/taar/data/raw/opencellid_pilot.csv", "w") as f:
+    csv_out = _REPO_ROOT / "data" / "raw" / "opencellid_pilot.csv"
+    with open(csv_out, "w") as f:
         f.write("\n".join(csv_lines) + "\n")
-    print("Created d:/taar/data/raw/opencellid_pilot.csv")
+    print(f"Created {csv_out}")
 
     # 3. Cells Base: 300m population grid
     # Generate ~400 cells covering 6 km x 6 km around the taluk
@@ -54,8 +58,8 @@ def generate_mock_data():
     features_base = []
     cell_id = 0
 
-    dem_path = "d:/taar/data/processed/dem_utm43n.tif"
-    dem = DEMGrid.from_file(dem_path)
+    dem_path = _REPO_ROOT / "data" / "processed" / "dem_utm43n.tif"
+    dem = DEMGrid.from_file(str(dem_path))
 
     cell_x_list = []
     cell_y_list = []
@@ -114,9 +118,10 @@ def generate_mock_data():
         "features": features_base,
     }
 
-    with open("d:/taar/contracts/mock/cells_base.geojson", "w") as f:
+    cells_base_path = _REPO_ROOT / "contracts" / "mock" / "cells_base.geojson"
+    with open(cells_base_path, "w") as f:
         json.dump(cells_base_geojson, f)
-    print(f"Created d:/taar/contracts/mock/cells_base.geojson with {len(features_base)} cells")
+    print(f"Created {cells_base_path} with {len(features_base)} cells")
 
     # 4. Generate cells.geojson (with baseline_dbm and state)
     cfg = PropagationConfig()
@@ -149,13 +154,16 @@ def generate_mock_data():
     }
 
     # Save to data/processed/cells.geojson and web/public/data/cells.geojson
-    with open("d:/taar/data/processed/cells.geojson", "w") as f:
+    cells_out_path = _REPO_ROOT / "data" / "processed" / "cells.geojson"
+    with open(cells_out_path, "w") as f:
         json.dump(cells_full_geojson, f)
-    print(f"Created d:/taar/data/processed/cells.geojson with {len(features_full)} features")
+    print(f"Created {cells_out_path} with {len(features_full)} features")
 
-    with open("d:/taar/web/public/data/cells.geojson", "w") as f:
+    web_cells_path = _REPO_ROOT / "web" / "public" / "data" / "cells.geojson"
+    web_cells_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(web_cells_path, "w") as f:
         json.dump(cells_full_geojson, f)
-    print("Copied to d:/taar/web/public/data/cells.geojson for Frontend")
+    print(f"Copied to {web_cells_path} for Frontend")
 
 
 if __name__ == "__main__":

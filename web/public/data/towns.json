@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Sakleshpur",
+    "lat": 12.972,
+    "lon": 75.785,
+    "type": "Taluk HQ"
+  },
+  {
+    "name": "Donigal",
+    "lat": 12.948,
+    "lon": 75.752,
+    "type": "Highway Junction"
+  },
+  {
+    "name": "Ballupete",
+    "lat": 12.912,
+    "lon": 75.835,
+    "type": "Settlement"
+  },
+  {
+    "name": "Anemahal",
+    "lat": 12.964,
+    "lon": 75.772,
+    "type": "Hamlet"
+  },
+  {
+    "name": "Heggadde",
+    "lat": 12.875,
+    "lon": 75.71,
+    "type": "Fringe Hamlet"
+  },
+  {
+    "name": "Shukravarasanthe",
+    "lat": 12.835,
+    "lon": 75.885,
+    "type": "Market Town"
+  },
+  {
+    "name": "Biccodu Cross",
+    "lat": 13.02,
+    "lon": 75.83,
+    "type": "Settlement"
+  },
+  {
+    "name": "Hanbal",
+    "lat": 13.045,
+    "lon": 75.685,
+    "type": "Ghat Junction"
+  }
+]

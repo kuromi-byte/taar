@@ -49,6 +49,8 @@ export interface Cluster {
   candidate_ids: (string | number)[]; // Empty array means "needs field survey"
   name_hint?: string;
   villages?: string[];
+  terrain_summary?: string;
+  needs_field_survey?: boolean;
 }
 
 export interface Town {

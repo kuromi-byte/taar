@@ -6,10 +6,13 @@ for thousands of population cells.
 """
 import time
 import numpy as np
+from pathlib import Path
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
 from pipeline.model.engine import compute_signal
 from pipeline.model.shadow import PolarSweepEngine
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def run_benchmark(num_cells: int = 5000, num_iterations: int = 10):
@@ -18,10 +21,10 @@ def run_benchmark(num_cells: int = 5000, num_iterations: int = 10):
     print("=" * 60)
 
     # 1. Setup DEM
-    dem_path = "d:/taar/data/processed/dem_utm43n.tif"
+    dem_path = _REPO_ROOT / "data" / "processed" / "dem_utm43n.tif"
     try:
         print(f"Loading real DEM from {dem_path}...")
-        dem = DEMGrid.from_file(dem_path)
+        dem = DEMGrid.from_file(str(dem_path))
         print(f"DEM loaded successfully: {dem.width}x{dem.height} pixels (resolution {dem.res_x}m)")
     except Exception as e:
         print(f"Using synthetic DEM due to: {e}")

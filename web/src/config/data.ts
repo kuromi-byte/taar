@@ -5,8 +5,8 @@
 import { pilotConfig } from './params';
 
 export const DATA_CONFIG = {
-  // Use mock or real API URL. Override via env var VITE_API_URL when real API is running
-  apiUrl: (import.meta.env.VITE_API_URL as string) || 'mock',
+  // Use real backend API running on port 8000 (FastAPI), with fallback capability
+  apiUrl: (import.meta.env.VITE_API_URL as string) || 'http://localhost:8000',
 
   // Static file paths (served from /web/public)
   paths: {
@@ -14,6 +14,7 @@ export const DATA_CONFIG = {
     candidates: '/data/candidates.json',
     clusters: '/data/clusters.json',
     towns: '/data/towns.json',
+    towers: '/data/towers.json',
     basemapBoundary: '/data/basemap/boundary.geojson',
     basemapRoads: '/data/basemap/roads.geojson',
   },

@@ -1,26 +1,21 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 .pytest_cache/
 
-# All raw and processed rasters/data — never commit
-data/
+# Local raw and processed large datasets - do not commit
+/data/
 *.tif
 *.tiff
 *.hgt
 *.csv
 *.json.bak
 
-# Large generated output — rebuild from scripts
-web/public/data/cells.geojson
-
 # Temporary files
 test_osm_towers.json
-<<<<<<< HEAD
 osm_towers.json
-=======
 
 # Web & Frontend
 **/node_modules/
@@ -31,5 +26,3 @@ web/node_modules/
 web/dist/
 .DS_Store
 *.local
-
->>>>>>> 8d2db84474eccae6360ea642796c31c97920d011

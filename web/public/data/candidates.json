@@ -1,0 +1,77 @@
+[
+  {
+    "id": "CAND-09",
+    "cluster_id": "CL-03",
+    "lat": 12.978794,
+    "lon": 75.770111,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 5269,
+    "flags": {
+      "road_km": 0.79,
+      "slope_deg": 6.0,
+      "backhaul": "Microwave relay (survey needed)"
+    },
+    "why": "Captures 5269 unserved residents across Anemahal & Kirehalli Hills; local prominence +-0.9m over valley; gentle slope (6.0\u00b0) with direct road access (0.79 km)."
+  },
+  {
+    "id": "CAND-07",
+    "cluster_id": "CL-02",
+    "lat": 12.943007,
+    "lon": 75.810003,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 4532,
+    "flags": {
+      "road_km": 0.11,
+      "slope_deg": 5.6,
+      "backhaul": "Fiber along road (113m)"
+    },
+    "why": "Captures 4532 unserved residents across Ballupete South-East Fringe; local prominence +38.9m over valley; gentle slope (5.6\u00b0) with direct road access (0.11 km)."
+  },
+  {
+    "id": "CAND-02",
+    "cluster_id": "CL-01",
+    "lat": 12.943168,
+    "lon": 75.76788,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 1370,
+    "flags": {
+      "road_km": 0.17,
+      "slope_deg": 6.0,
+      "backhaul": "Fiber along road (165m)"
+    },
+    "why": "Captures 1370 unserved residents across Donigal Valley & Kadagaravalli; local prominence +-31.7m over valley; gentle slope (6.0\u00b0) with direct road access (0.17 km)."
+  },
+  {
+    "id": "CAND-010",
+    "cluster_id": "CL-03",
+    "lat": 12.980593,
+    "lon": 75.773344,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 476,
+    "flags": {
+      "road_km": 0.85,
+      "slope_deg": 4.2,
+      "backhaul": "Microwave relay (survey needed)"
+    },
+    "why": "Captures 476 unserved residents across Anemahal & Kirehalli Hills; local prominence +-22.7m over valley; gentle slope (4.2\u00b0) with direct road access (0.85 km)."
+  },
+  {
+    "id": "CAND-05",
+    "cluster_id": "CL-02",
+    "lat": 12.940286,
+    "lon": 75.812759,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 298,
+    "flags": {
+      "road_km": 0.16,
+      "slope_deg": 3.9,
+      "backhaul": "Fiber along road (162m)"
+    },
+    "why": "Captures 298 unserved residents across Ballupete South-East Fringe; local prominence +16.5m over valley; gentle slope (3.9\u00b0) with direct road access (0.16 km)."
+  }
+]

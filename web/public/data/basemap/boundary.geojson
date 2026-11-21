@@ -1,0 +1,41 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 1,
+      "properties": {
+        "name": "Sakleshpur Taluk Boundary",
+        "district": "Hassan",
+        "state": "Karnataka"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.6,
+              12.8
+            ],
+            [
+              75.95,
+              12.8
+            ],
+            [
+              75.95,
+              13.1
+            ],
+            [
+              75.6,
+              13.1
+            ],
+            [
+              75.6,
+              12.8
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
