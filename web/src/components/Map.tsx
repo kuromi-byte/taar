@@ -41,37 +41,54 @@ export const CoverageMap: React.FC<MapProps> = ({
   const townMarkersRef = useRef<Marker[]>([]);
   const previousOverriddenRef = useRef<Set<number>>(new Set());
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [webGlSupported, setWebGlSupported] = useState(true);
 
   // 1. Initialize MapLibre GL
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
 
-    // 100% Offline Blank Dark Style Specification (no external network or font glyphs)
-    const offlineDarkStyle: maplibregl.StyleSpecification = {
-      version: 8,
-      sources: {},
-      layers: [
-        {
-          id: 'background',
-          type: 'background',
-          paint: {
-            'background-color': '#090d16', // Deep slate dark background
-          },
-        },
-      ],
+    const isWebGLAvailable = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        return !!(window.WebGLRenderingContext && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+      } catch {
+        return false;
+      }
     };
 
-    const map = new maplibregl.Map({
-      container: mapContainer.current,
-      style: offlineDarkStyle,
-      center: DATA_CONFIG.pilot.center,
-      zoom: DATA_CONFIG.pilot.zoom,
-      attributionControl: false,
-    });
+    if (!isWebGLAvailable()) {
+      console.warn('MapLibre GL is not supported: WebGL is disabled or unavailable.');
+      setWebGlSupported(false);
+      return;
+    }
 
-    mapRef.current = map;
+    try {
+      // 100% Offline Blank Dark Style Specification (no external network or font glyphs)
+      const offlineDarkStyle: maplibregl.StyleSpecification = {
+        version: 8,
+        sources: {},
+        layers: [
+          {
+            id: 'background',
+            type: 'background',
+            paint: {
+              'background-color': '#090d16', // Deep slate dark background
+            },
+          },
+        ],
+      };
 
-    map.on('load', () => {
+      const map = new maplibregl.Map({
+        container: mapContainer.current,
+        style: offlineDarkStyle,
+        center: DATA_CONFIG.pilot.center,
+        zoom: DATA_CONFIG.pilot.zoom,
+        attributionControl: false,
+      });
+
+      mapRef.current = map;
+
+      map.on('load', () => {
       const [minLon, minLat, maxLon, maxLat] = DATA_CONFIG.pilot.bbox;
 
       // 1a. Boundary Layer (Taluk pilot border)
@@ -195,10 +212,16 @@ export const CoverageMap: React.FC<MapProps> = ({
 
       setMapLoaded(true);
     });
+    } catch (err) {
+      console.error('Failed to initialize MapLibre GL:', err);
+      setWebGlSupported(false);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, []);
 
@@ -359,6 +382,29 @@ export const CoverageMap: React.FC<MapProps> = ({
   return (
     <div className="map-viewport">
       <div ref={mapContainer} className="map-container" />
+
+      {!webGlSupported && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: '#090d16ee',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            textAlign: 'center',
+            zIndex: 10,
+          }}
+        >
+          <h3 style={{ color: '#f59e0b', marginBottom: '8px' }}>WebGL Not Detected in Browser</h3>
+          <p style={{ color: '#94a3b8', maxWidth: '420px', fontSize: '13px', lineHeight: 1.5 }}>
+            MapLibre GL requires WebGL hardware acceleration to render the map tiles.
+            Please verify that <strong>Use hardware acceleration when available</strong> is enabled in your browser settings (e.g. <code>chrome://settings/system</code>).
+          </p>
+        </div>
+      )}
 
       {/* Floating Map Legend */}
       <div className="map-floating-legend">
