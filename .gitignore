@@ -5,11 +5,17 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# Raw and bulky data files (as specified in rundown.md)
-data/raw/
+# All raw and processed rasters/data — never commit
+data/
 *.tif
 *.tiff
 *.hgt
+*.csv
+*.json.bak
+
+# Large generated output — rebuild from scripts
+web/public/data/cells.geojson
 
 # Temporary files
 test_osm_towers.json
+osm_towers.json

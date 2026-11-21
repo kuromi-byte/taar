@@ -1,29 +1,67 @@
 [
   {
+    "_mock": true,
     "id": 1,
     "lat": 12.9735,
     "lon": 75.7842,
-    "height": 30.0,
-    "power": 43.0,
+    "height_m": 30.0,
+    "power_dbm": 43.0,
     "assumed": true,
-    "name": "Sakleshpur Town Mast"
+    "radio": "LTE",
+    "mcc": 404,
+    "net": 45,
+    "source": "mock-stub"
   },
   {
+    "_mock": true,
     "id": 2,
-    "lat": 12.948,
-    "lon": 75.752,
-    "height": 30.0,
-    "power": 43.0,
+    "lat": 12.9480,
+    "lon": 75.7520,
+    "height_m": 30.0,
+    "power_dbm": 43.0,
     "assumed": true,
-    "name": "Donigal Highway Tower"
+    "radio": "UMTS",
+    "mcc": 404,
+    "net": 20,
+    "source": "mock-stub"
   },
   {
+    "_mock": true,
     "id": 3,
-    "lat": 12.912,
-    "lon": 75.835,
-    "height": 30.0,
-    "power": 43.0,
+    "lat": 12.9120,
+    "lon": 75.8350,
+    "height_m": 30.0,
+    "power_dbm": 43.0,
     "assumed": true,
-    "name": "Ballupete Junction Mast"
+    "radio": "GSM",
+    "mcc": 404,
+    "net": 20,
+    "source": "mock-stub"
+  },
+  {
+    "_mock": true,
+    "id": 4,
+    "lat": 13.0400,
+    "lon": 75.7000,
+    "height_m": 30.0,
+    "power_dbm": 43.0,
+    "assumed": true,
+    "radio": "LTE",
+    "mcc": 404,
+    "net": 45,
+    "source": "mock-stub"
+  },
+  {
+    "_mock": true,
+    "id": 5,
+    "lat": 13.0700,
+    "lon": 75.9000,
+    "height_m": 30.0,
+    "power_dbm": 43.0,
+    "assumed": true,
+    "radio": "LTE",
+    "mcc": 405,
+    "net": 30,
+    "source": "mock-stub"
   }
 ]
