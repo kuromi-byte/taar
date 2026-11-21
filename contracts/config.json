@@ -1,0 +1,44 @@
+{
+  "pilot": {
+    "name": "Sakleshpur",
+    "district": "Hassan",
+    "state": "Karnataka",
+    "bbox_wgs84": {
+      "min_lon": 75.60,
+      "max_lon": 75.95,
+      "min_lat": 12.80,
+      "max_lat": 13.10
+    },
+    "terrain_buffer_km": 10.0,
+    "crs_internal": "EPSG:32643",
+    "crs_exchange": "EPSG:4326"
+  },
+  "propagation": {
+    "frequency_mhz": 900.0,
+    "tower_height_m": 30.0,
+    "rx_height_m": 1.5,
+    "shadow_penalty_db": 15.0,
+    "gap_threshold_dbm": -100.0,
+    "uncertain_band_db": 6.0,
+    "max_radius_km": 10.0,
+    "ray_step_m": 30.0,
+    "n_rays": 720,
+    "eirp_dbm": 43.0
+  },
+  "paths": {
+    "dem_raw_dir": "data/raw",
+    "dem_processed": "data/processed/dem_utm43n.tif",
+    "opencellid_csv": "data/raw/opencellid_pilot.csv",
+    "towers_json": "contracts/mock/towers.json",
+    "cells_base_geojson": "contracts/mock/cells_base.geojson",
+    "cells_out_geojson": "data/processed/cells.geojson"
+  },
+  "_notes": {
+    "frequency_choice": "900 MHz assumed (Okumura-Hata open-area formula applies). Change to 1800 for COST-231 Hata.",
+    "tower_height": "ASSUMED 30 m — not measured. Flagged in towers.json assumed=true.",
+    "eirp": "ASSUMED 43 dBm (20W macrocell). Not operator-verified.",
+    "shadow_penalty": "ASSUMED 15 dB flat penalty for terrain-obstructed cells. Not validated.",
+    "gap_threshold": "-100 dBm. Set together with uncertain_band so classify_state is meaningful.",
+    "earth_curvature": "IGNORED. At 10 km max radius the sagitta is ~8 m which is within DEM noise."
+  }
+}

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+
+# Raw and bulky data files (as specified in rundown.md)
+data/raw/
+*.tif
+*.tiff
+*.hgt
+
+# Temporary files
+test_osm_towers.json
