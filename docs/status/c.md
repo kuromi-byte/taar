@@ -75,6 +75,7 @@
 - [x] Dev B: Draggable candidate markers and shortlist table wired with click-to-zoom and briefing generator.
 - [x] Dev C: Idempotent `applyRecompute` pure function and test suite verified.
 - [x] Dev C: Task 2 Double-Drag Test & API Contract Verification (CDP automation, request sequence guard, stale footprint elimination).
+- [x] Dev C: Task 3 Visual Verification, State Colors & Legend Synchronization (CDP automation, pixel sampling, unknown-as-grey invariant).
 - [ ] Dev B: Run FastAPI backend concurrently (`uvicorn api.main:app --port 8000`) for live multi-tower what-if testing.
 
 ## Task 2 Double-Drag Test & Contract Verification [MOCK HANDLER]
@@ -137,3 +138,74 @@ Automated via [`scratch/run_double_drag_cdp.mjs`](file:///C:/Users/20635/.gemini
 ### D. Verification & Build
 - Vitest: **25 / 25 unit tests passed** across all 5 test files (`styleExpressions`, `recompute`, `params`, `components`, `requestSequence`).
 - Production build: `npm run build` completed cleanly; `dist/assets/*.js` contains **0 occurrences** of `__bench` (tree-shaking verified).
+
+## Task 3 Visual Verification, Colors & Legend Synchronization [REAL DATA]
+
+### A. One Source of Truth for Colors & Thresholds
+- **Single Source of Truth**: Created [`web/src/config/stateColors.ts`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/src/config/stateColors.ts) exporting `STATE_COLORS` (`covered: '#10b981'`, `uncertain: '#f59e0b'`, `gap: '#ef4444'`, `unknown: '#6b7280'`).
+  - Used directly by [`styleExpressions.ts`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/src/utils/styleExpressions.ts) for MapLibre GPU rendering.
+  - Used directly by [`Map.tsx`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/src/components/Map.tsx) for inline swatch styles in `.map-floating-legend`.
+  - Expression and legend colors cannot drift.
+- **Dynamic Threshold Derivation**:
+  - `coveredThreshold = params.gap_threshold_dbm + params.uncertain_band_db` (-100 + 6 = -94.0 dBm).
+  - `gapThreshold = params.gap_threshold_dbm - params.uncertain_band_db` (-100 - 6 = -106.0 dBm).
+  - Legend labels dynamically render `coveredThreshold.toFixed(0)` and `gapThreshold.toFixed(0)`.
+  - Grep check for hardcoded `-94`, `-100`, `-106` across `/web/src`: Confirmed 0 hardcoded signal numbers in layout/business logic (only CSS `transform: translate(-50%, -100%)` and parameter fallbacks).
+
+### B. Unit Testing & Boundary Specification (Vitest: 35/35 Passed)
+- **Boundary Rule Specification**:
+  - **Covered**: $dbm \ge -94.0\text{ dBm}$ (inclusive) -> `#10b981`
+  - **Uncertain**: $-106.0\text{ dBm} \le dbm < -94.0\text{ dBm}$ (inclusive of -106.0, exclusive of -94.0) -> `#f59e0b`
+  - **Gap**: $dbm < -106.0\text{ dBm}$ (exclusive) -> `#ef4444`
+  - **Unknown**: Always grey (`#6b7280`), regardless of signal strength or feature-state overrides.
+- **Vitest Boundary Tests (`styleExpressions.test.ts`)**:
+  - `dbm = -93.9`: `covered` (`#10b981`) -> **PASS**
+  - `dbm = -94.0`: `covered` (`#10b981`, inclusive boundary) -> **PASS**
+  - `dbm = -94.1`: `uncertain` (`#f59e0b`, just below covered boundary) -> **PASS**
+  - `dbm = -105.9`: `uncertain` (`#f59e0b`, inside uncertain band) -> **PASS**
+  - `dbm = -106.0`: `uncertain` (`#f59e0b`, inclusive lower boundary of band) -> **PASS**
+  - `dbm = -106.1`: `gap` (`#ef4444`, below band) -> **PASS**
+- **Param-Driven Test**: Validated custom thresholds (e.g. -90 dBm / -110 dBm) adjust stops in generated MapLibre expressions -> **PASS**.
+- **Unknown-as-Grey Invariant**: Verified unknown cells evaluate to `#6b7280` under baseline -120 dBm, baseline -80 dBm, feature-state -75 dBm, and capitalized `'Unknown'` -> **PASS**.
+- **Pure MOCK Banner Condition**: `isMockSource('mock') === true`, `isMockSource('worldpop') === false`, `isMockSource(null/undefined/'') === false` -> **PASS**.
+
+### C. Visual Check in Browser (CDP Automation, Real Cells File)
+- **Rendered Cell Counts (11,394 Total Cells in `cells.geojson`)**:
+  - `covered`: **308 cells** (2.7%)
+  - `uncertain`: **721 cells** (6.3%)
+  - `gap`: **10,176 cells** (89.3%), comprising 8,126 with modeled `baseline_dbm` and 2,050 with `baseline_dbm == null`
+  - `unknown`: **189 cells** (1.7%)
+- **Pixel Sampling for 5 Cell Categories (Alpha Blend $0.75 \times \text{layer} + 0.25 \times \text{bg}$ `#090d16`)**:
+  - Basemap lines (`osm-roads-line`, `cells-line`, `taluk-boundary-line`) hidden during sampling.
+  - Coordinates projected from true polygon centroids.
+
+| Category | Real Cell ID | Expected RGB | Sampled Actual RGB | Max Channel Diff | Status |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Covered** | 668 | `rgb(14, 142, 102)` | `rgb(15, 144, 104)` | 2 (tolerance 12) | **PASS** |
+| **Uncertain** | 96 | `rgb(186, 122, 14)` | `rgb(187, 124, 15)` | 2 (tolerance 12) | **PASS** |
+| **Gap (with baseline_dbm)** | 11 | `rgb(182, 54, 57)` | `rgb(182, 56, 58)` | 2 (tolerance 12) | **PASS** |
+| **Gap (baseline_dbm null)** | 1 | `rgb(182, 54, 57)` | `rgb(182, 56, 58)` | 2 (tolerance 12) | **PASS** |
+| **Unknown** | 8737 | `rgb(83, 89, 102)` | `rgb(83, 91, 103)` | 2 (tolerance 12) | **PASS** |
+
+- **Feature-State Override Test**:
+  - Unknown cell #8737 with -80.0 dBm feature-state: sampled `rgb(83, 91, 103)` (expected grey `rgb(83, 89, 102)`, diff 2) -> **PASS (Remains Grey)**.
+  - Gap cell #11 with -80.0 dBm feature-state: sampled `rgb(15, 144, 104)` (expected green `rgb(14, 142, 102)`, diff 2) -> **PASS (Turns Covered Green)**.
+  - Feature-state cleared and layers restored -> **CONFIRMED**.
+- **Legend & Layout Verification**:
+  - Swatches match `STATE_COLORS`: Covered (`#10b981`), Uncertain (`#f59e0b`), Gap (`#ef4444`), Unknown (`#6b7280`).
+  - Labels verified: `Likely covered (≥ -94 dBm)`, `Uncertain (-106 to -94 dBm)`, `Likely gap (< -106 dBm)`, `Unknown: no tower evidence`.
+  - Viewport 1366x768: Modeled badge (`top: 12, left: 383`) and Legend (`top: 528, left: 646`) visible and non-overlapping with shortlist panel and modal open -> **PASS**.
+  - Viewport 1920x1080: Modeled badge (`top: 12, left: 383`) and Legend (`top: 840, left: 1200`) visible and non-overlapping with shortlist panel and modal open -> **PASS**.
+  - Screenshots captured in `web/e2e-output/`:
+    - `viewport_1366x768.png` (152.1 KB)
+    - `viewport_1366x768_modal.png` (147.4 KB)
+    - `viewport_1920x1080.png` (158.8 KB)
+    - `viewport_1920x1080_modal.png` (187.4 KB)
+- **Modeled Badge Text & Modals Presence**:
+  - Header badge text: exactly `"Modeled, not measured"` -> **PASS**.
+  - LimitationsModal: Features `"Modeled, Not Measured"` as Core Principle 1.
+  - BriefModal: Section 4 features `"Modeled, Not Measured"` transparency declaration.
+
+### D. Final Build & Tree-Shaking
+- Vitest: **35 / 35 tests passed** across all 5 test files.
+- `npm run build`: Production build succeeded in 3.20s; `dist/assets/*.js` contains **0 occurrences** of `__bench`.

@@ -1,12 +1,15 @@
 // /web/src/utils/styleExpressions.ts
 // Pure style expression helpers for MapLibre GL cell layers
+import { STATE_COLORS } from '../config/stateColors';
 
-export const CELL_COLORS = {
-  unknown: '#6b7280',
-  covered: '#10b981',
-  uncertain: '#f59e0b',
-  gap: '#ef4444',
-} as const;
+export const CELL_COLORS = STATE_COLORS;
+
+/**
+ * Pure check for whether metadata indicates synthetic mock data.
+ */
+export function isMockSource(source?: string | null): boolean {
+  return source === 'mock';
+}
 
 /**
  * Builds the data-driven fill-color expression for the cells layer.

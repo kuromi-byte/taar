@@ -3,6 +3,7 @@ import maplibregl, { Map as MapLibreMap, Marker, Popup } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { DATA_CONFIG } from '../config/data';
 import { params } from '../config/params';
+import { STATE_COLORS } from '../config/stateColors';
 import { Candidate, Town } from '../types/contracts';
 import { applyRecompute } from '../utils/recompute';
 import { buildCellColorExpression } from '../utils/styleExpressions';
@@ -171,7 +172,7 @@ export const CoverageMap: React.FC<MapProps> = ({
           source: 'cells',
           paint: {
             'fill-color': buildCellColorExpression(coveredThreshold, gapThreshold) as any,
-            'fill-opacity': 0.65,
+            'fill-opacity': 0.75,
           },
         });
 
@@ -437,20 +438,20 @@ export const CoverageMap: React.FC<MapProps> = ({
         <div className="legend-title">Signal Classification</div>
         <div className="legend-items">
           <div className="legend-item">
-            <span className="color-swatch covered"></span>
-            <span>Covered (&ge; {coveredThreshold.toFixed(0)} dBm)</span>
+            <span className="color-swatch covered" style={{ backgroundColor: STATE_COLORS.covered }}></span>
+            <span>Likely covered (&ge; {coveredThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch uncertain"></span>
+            <span className="color-swatch uncertain" style={{ backgroundColor: STATE_COLORS.uncertain }}></span>
             <span>Uncertain ({gapThreshold.toFixed(0)} to {coveredThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch gap"></span>
-            <span>Gap (&lt; {gapThreshold.toFixed(0)} dBm)</span>
+            <span className="color-swatch gap" style={{ backgroundColor: STATE_COLORS.gap }}></span>
+            <span>Likely gap (&lt; {gapThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch unknown"></span>
-            <span>Unknown (No Tower Evidence)</span>
+            <span className="color-swatch unknown" style={{ backgroundColor: STATE_COLORS.unknown }}></span>
+            <span>Unknown: no tower evidence</span>
           </div>
           <div className="legend-divider"></div>
           <div className="legend-item">

@@ -8,6 +8,7 @@ import { LimitationsModal } from './components/LimitationsModal';
 import { DATA_CONFIG } from './config/data';
 import { Candidate, Cluster, RecomputeRequest, RecomputeResponse } from './types/contracts';
 import { RequestSequenceGuard } from './utils/requestSequence';
+import { isMockSource } from './utils/styleExpressions';
 
 export const App: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -50,7 +51,7 @@ export const App: React.FC = () => {
     fetch(DATA_CONFIG.paths.cells)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data && (data.meta?.source === 'mock' || data.source === 'mock')) {
+        if (data && (isMockSource(data.meta?.source) || isMockSource(data.source))) {
           setIsMockData(true);
         }
       })
