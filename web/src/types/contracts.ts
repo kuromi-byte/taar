@@ -1,12 +1,14 @@
 // /web/src/types/contracts.ts
 // Shared contract interfaces for Gap-to-Brief (Dev C frontend)
 
-export type CellState = 'covered' | 'gap' | 'uncertain' | 'unknown';
+export type CellState = 'covered' | 'gap' | 'uncertain' | 'unknown' | 'Likely covered' | 'Likely gap' | 'Uncertain' | 'Unknown';
 
 export interface CellProperties {
+  id?: number;
   pop: number;
   baseline_dbm: number | null;
   state: CellState;
+  [key: string]: unknown;
 }
 
 export interface CellFeature {
@@ -46,6 +48,7 @@ export interface Cluster {
   pop_in_gap: number;
   candidate_ids: (string | number)[]; // Empty array means "needs field survey"
   name_hint?: string;
+  villages?: string[];
 }
 
 export interface Town {
@@ -78,12 +81,35 @@ export interface ConfigBboxWGS84 {
   max_lat: number;
 }
 
+export interface PilotConfig {
+  name: string;
+  district?: string;
+  state?: string;
+  bbox_wgs84: ConfigBboxWGS84;
+  terrain_buffer_km?: number;
+  crs_internal?: string;
+  crs_exchange?: string;
+}
+
+export interface PropagationConfig {
+  frequency_mhz: number;
+  tower_height_m: number;
+  rx_height_m: number;
+  shadow_penalty_db: number;
+  gap_threshold_dbm: number;
+  uncertain_band_db: number;
+  max_radius_km: number;
+  ray_step_m: number;
+  n_rays: number;
+  eirp_dbm: number;
+}
+
 export interface ContractConfig {
   gap_threshold_dbm: number;
   uncertain_band_db: number;
   max_radius_km: number;
-  pilot?: {
-    name?: string;
-    bbox_wgs84: ConfigBboxWGS84;
-  };
+  propagation?: Partial<PropagationConfig>;
+  pilot?: Partial<PilotConfig>;
+  paths?: Record<string, string>;
+  _notes?: Record<string, string>;
 }
