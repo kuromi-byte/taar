@@ -1,0 +1,18 @@
+{
+  "towers": {
+    "source": "OpenCellID",
+    "description": "Base station tower locations and radio parameters from OpenCellID"
+  },
+  "cells": {
+    "source": "WorldPop",
+    "description": "300m population grid aggregated from WorldPop India 2020 100m raster"
+  },
+  "candidates": {
+    "source": "WorldPop",
+    "description": "Ranked candidate tower sites derived from WorldPop gap clusters"
+  },
+  "clusters": {
+    "source": "WorldPop",
+    "description": "Spatial 8-connected unserved population clusters from WorldPop"
+  }
+}

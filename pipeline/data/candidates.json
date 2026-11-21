@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "source": "WorldPop"
+  },
+  "items": [
+    {
+      "id": "CAND-01",
+      "cluster_id": "CL-01",
+      "lat": 12.90375,
+      "lon": 75.753749,
+      "height": 30.0,
+      "power": 43.0,
+      "added_pop": 10377,
+      "flags": {
+        "road_km": 0.62,
+        "slope_deg": 11.2,
+        "backhaul": "Microwave LoS to Sakleshpur HQ"
+      },
+      "why": "Captures 10,377 unserved residents in the Near Shukravarasanthe area; local elevation prominence +33 m over surrounding terrain; slope 11.2\u00b0 (< 15.0\u00b0), direct road access 0.62 km."
+    },
+    {
+      "id": "CAND-02",
+      "cluster_id": "CL-01",
+      "lat": 12.91625,
+      "lon": 75.746249,
+      "height": 30.0,
+      "power": 43.0,
+      "added_pop": 219,
+      "flags": {
+        "road_km": 0.169,
+        "slope_deg": 7.5,
+        "backhaul": "Fiber along road (169m)"
+      },
+      "why": "Captures 219 unserved residents in the Near Shukravarasanthe area; local elevation prominence +47 m over surrounding terrain; slope 7.5\u00b0 (< 15.0\u00b0), direct road access 0.169 km."
+    },
+    {
+      "id": "CAND-03",
+      "cluster_id": "CL-01",
+      "lat": 12.963751,
+      "lon": 75.733749,
+      "height": 30.0,
+      "power": 43.0,
+      "added_pop": 59,
+      "flags": {
+        "road_km": 0.861,
+        "slope_deg": 3.1,
+        "backhaul": "Microwave relay (survey needed)"
+      },
+      "why": "Captures 59 unserved residents in the Near Shukravarasanthe area; local elevation prominence +37 m over surrounding terrain; slope 3.1\u00b0 (< 15.0\u00b0), direct road access 0.861 km."
+    },
+    {
+      "id": "CAND-04",
+      "cluster_id": "CL-01",
+      "lat": 12.90625,
+      "lon": 75.766249,
+      "height": 30.0,
+      "power": 43.0,
+      "added_pop": 44,
+      "flags": {
+        "road_km": 0.323,
+        "slope_deg": 0.9,
+        "backhaul": "Fiber along road (323m)"
+      },
+      "why": "Captures 44 unserved residents in the Near Shukravarasanthe area; local elevation prominence +34 m over surrounding terrain; slope 0.9\u00b0 (< 15.0\u00b0), direct road access 0.323 km."
+    },
+    {
+      "id": "CAND-05",
+      "cluster_id": "CL-01",
+      "lat": 12.903751,
+      "lon": 75.751249,
+      "height": 30.0,
+      "power": 43.0,
+      "added_pop": 19,
+      "flags": {
+        "road_km": 0.652,
+        "slope_deg": 5.1,
+        "backhaul": "Microwave LoS to Sakleshpur HQ"
+      },
+      "why": "Captures 19 unserved residents in the Near Shukravarasanthe area; local elevation prominence +47 m over surrounding terrain; slope 5.1\u00b0 (< 15.0\u00b0), direct road access 0.652 km."
+    }
+  ]
+}
