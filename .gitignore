@@ -13,3 +13,14 @@ data/raw/
 
 # Temporary files
 test_osm_towers.json
+
+# Web & Frontend
+**/node_modules/
+**/dist/
+node_modules/
+dist/
+web/node_modules/
+web/dist/
+.DS_Store
+*.local
+
