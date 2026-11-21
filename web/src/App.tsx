@@ -6,7 +6,7 @@ import { CoverageMap } from './components/Map';
 import { BriefModal } from './components/BriefModal';
 import { LimitationsModal } from './components/LimitationsModal';
 import { DATA_CONFIG } from './config/data';
-import { Candidate, Cluster, RecomputeResponse } from './types/contracts';
+import { Candidate, Cluster, RecomputeRequest, RecomputeResponse } from './types/contracts';
 
 export const App: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -19,10 +19,12 @@ export const App: React.FC = () => {
   // Coverage statistics & what-if state
   const [totalUnservedPop, setTotalUnservedPop] = useState<number>(19309);
   const [newlyCoveredPop, setNewlyCoveredPop] = useState<number>(0);
-  const [overriddenDbmMap, setOverriddenDbmMap] = useState<globalThis.Map<number, number>>(new globalThis.Map());
+  const [changedCells, setChangedCells] = useState<[number, number][]>([]);
   const [showModeled, setShowModeled] = useState<boolean>(true);
   const [isRecomputing, setIsRecomputing] = useState<boolean>(false);
   const [apiConnected, setApiConnected] = useState<boolean>(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [isMockData, setIsMockData] = useState<boolean>(false);
 
   // Modals
   const [activeBriefCluster, setActiveBriefCluster] = useState<Cluster | null>(null);
@@ -38,17 +40,32 @@ export const App: React.FC = () => {
       })
       .catch(() => setApiConnected(false));
 
+    // Audit cells.geojson for meta.source == "mock"
+    fetch(DATA_CONFIG.paths.cells)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && (data.meta?.source === 'mock' || data.source === 'mock')) {
+          setIsMockData(true);
+        }
+      })
+      .catch((err) => console.warn('Could not inspect cells metadata:', err));
+
     // Fetch Candidates
     fetch(DATA_CONFIG.paths.candidates)
       .then((res) => (res.ok ? res.json() : []))
       .then((data: Candidate[]) => {
         if (Array.isArray(data) && data.length > 0) {
-          setCandidates(data);
-          setInitialCandidates(JSON.parse(JSON.stringify(data)));
-          // Sum initial added population
-          const sumAdded = data.reduce((acc, c) => acc + (c.added_pop || 0), 0);
+          // Normalize height_m and power_dbm defaults if missing
+          const normalized = data.map((c) => ({
+            ...c,
+            height_m: (c as any).height_m ?? 30.0,
+            power_dbm: (c as any).power_dbm ?? 43.0,
+          }));
+          setCandidates(normalized);
+          setInitialCandidates(JSON.parse(JSON.stringify(normalized)));
+          const sumAdded = normalized.reduce((acc, c) => acc + (c.added_pop || 0), 0);
           setNewlyCoveredPop(sumAdded);
-          setSelectedCandidateId(data[0].id);
+          setSelectedCandidateId(normalized[0].id);
         }
       })
       .catch((err) => console.error('Failed to load candidates:', err));
@@ -66,45 +83,45 @@ export const App: React.FC = () => {
       .catch((err) => console.error('Failed to load clusters:', err));
   }, []);
 
-  // 2. Perform Recompute against FastAPI Backend
+  // 2. Perform Recompute against FastAPI Backend using EXACT contract shape
   const runRecompute = useCallback(async (currentCandidates: Candidate[]) => {
     setIsRecomputing(true);
+    setApiError(null);
 
-    const payload = currentCandidates.map((c) => ({
-      id: c.id,
-      lat: c.lat,
-      lon: c.lon,
-      height: 30.0,
-      power: 43.0,
-    }));
+    // Contract: {"towers":[{"lat": number, "lon": number, "height_m": number, "power_dbm": number}]}
+    const requestPayload: RecomputeRequest = {
+      towers: currentCandidates.map((c) => ({
+        lat: c.lat,
+        lon: c.lon,
+        height_m: (c as any).height_m || 30.0,
+        power_dbm: (c as any).power_dbm || 43.0,
+      })),
+    };
 
     try {
       const response = await fetch(`${DATA_CONFIG.apiUrl}/recompute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestPayload),
       });
 
       if (!response.ok) {
-        throw new Error(`Recompute HTTP ${response.status}`);
+        throw new Error(`Recompute HTTP ${response.status}: ${response.statusText}`);
       }
 
       const resData: RecomputeResponse = await response.json();
       setApiConnected(true);
 
-      // Convert changed [[id, dbm], ...] to Map
-      const newMap = new globalThis.Map<number, number>();
-      resData.changed.forEach(([id, dbm]) => {
-        newMap.set(id, dbm);
-      });
-
-      setOverriddenDbmMap(newMap);
+      // Contract response: {"changed": [[cell_id, dbm], ...], "newly_covered_pop": N, "total_unserved_pop": M}
+      setChangedCells(resData.changed);
       setNewlyCoveredPop(resData.newly_covered_pop);
       setTotalUnservedPop(resData.total_unserved_pop);
       setShowModeled(true);
-    } catch (err) {
-      console.warn('API recompute unavailable, using client-side calculation fallback:', err);
+    } catch (err: any) {
+      // Contract rule: "If the API call fails, show a clear error and keep the previous map state."
+      console.warn('API recompute failed; preserving previous map state:', err);
       setApiConnected(false);
+      setApiError(`Recompute failed: ${err.message || 'API endpoint unavailable'}. Preserving previous map state.`);
     } finally {
       setIsRecomputing(false);
     }
@@ -117,7 +134,7 @@ export const App: React.FC = () => {
     }
   }, [initialCandidates, runRecompute]);
 
-  // 3. Candidate Drag Handler
+  // 3. Candidate Drag Handler (Fires strictly on marker DROP)
   const handleCandidateMove = useCallback(
     (id: string | number, newLat: number, newLon: number) => {
       setCandidates((prev) => {
@@ -140,21 +157,84 @@ export const App: React.FC = () => {
     [runRecompute]
   );
 
-  // 4. Reset Candidates to Initial
+  // 4. Update Candidate Parameters (height_m, power_dbm)
+  const handleCandidateParamChange = useCallback(
+    (id: string | number, field: 'height_m' | 'power_dbm', value: number) => {
+      setCandidates((prev) => {
+        const updated = prev.map((c) => {
+          if (c.id === id) {
+            return {
+              ...c,
+              [field]: value,
+            };
+          }
+          return c;
+        });
+        runRecompute(updated);
+        return updated;
+      });
+    },
+    [runRecompute]
+  );
+
+  // 5. Delete Candidate
+  const handleDeleteCandidate = useCallback(
+    (id: string | number) => {
+      setCandidates((prev) => {
+        const updated = prev.filter((c) => c.id !== id);
+        if (selectedCandidateId === id) {
+          setSelectedCandidateId(updated.length > 0 ? updated[0].id : null);
+        }
+        runRecompute(updated);
+        return updated;
+      });
+    },
+    [selectedCandidateId, runRecompute]
+  );
+
+  // 6. Add Candidate
+  const handleAddCandidate = useCallback(() => {
+    const newId = `cand-custom-${Date.now().toString().slice(-4)}`;
+    const newCand: Candidate = {
+      id: newId,
+      cluster_id: selectedClusterId || 'custom',
+      lat: Number((DATA_CONFIG.pilot.center[1] + (Math.random() - 0.5) * 0.05).toFixed(6)),
+      lon: Number((DATA_CONFIG.pilot.center[0] + (Math.random() - 0.5) * 0.05).toFixed(6)),
+      added_pop: 0,
+      flags: {
+        road_km: 0.45,
+        slope_deg: 6.2,
+        backhaul: 'Fiber feasible',
+      },
+      why: 'User-placed candidate site for scenario testing',
+      height_m: 30.0,
+      power_dbm: 43.0,
+    } as any;
+
+    setCandidates((prev) => {
+      const updated = [...prev, newCand];
+      setSelectedCandidateId(newId);
+      setFlyToTarget({ lat: newCand.lat, lon: newCand.lon });
+      runRecompute(updated);
+      return updated;
+    });
+  }, [selectedClusterId, runRecompute]);
+
+  // 7. Reset Candidates to Initial
   const handleResetCandidates = useCallback(() => {
     const copy = JSON.parse(JSON.stringify(initialCandidates));
     setCandidates(copy);
     runRecompute(copy);
   }, [initialCandidates, runRecompute]);
 
-  // 5. Select Candidate
+  // 8. Select Candidate
   const handleSelectCandidate = useCallback((candidate: Candidate) => {
     setSelectedCandidateId(candidate.id);
     setSelectedClusterId(candidate.cluster_id);
     setFlyToTarget({ lat: candidate.lat, lon: candidate.lon });
   }, []);
 
-  // 6. Select Cluster
+  // 9. Select Cluster
   const handleSelectCluster = useCallback(
     (cluster: Cluster) => {
       setSelectedClusterId(cluster.id);
@@ -167,12 +247,24 @@ export const App: React.FC = () => {
     [candidates]
   );
 
+  const selectedCandidate = candidates.find((c) => c.id === selectedCandidateId);
+
   return (
     <div className="app-container">
       <Header
         onOpenLimitations={() => setShowLimitationsModal(true)}
         apiConnected={apiConnected}
+        isMockData={isMockData}
       />
+
+      {apiError && (
+        <div className="api-error-banner" role="alert">
+          <span>⚠️ {apiError}</span>
+          <button className="error-close-btn" onClick={() => setApiError(null)}>
+            &times;
+          </button>
+        </div>
+      )}
 
       <div className="main-content-split">
         {/* Left Side: Interactive Map */}
@@ -196,7 +288,7 @@ export const App: React.FC = () => {
               const c = candidates.find((cand) => cand.id === id);
               if (c) handleSelectCandidate(c);
             }}
-            overriddenDbmMap={overriddenDbmMap}
+            changedCells={changedCells}
             showModeled={showModeled}
             flyToTarget={flyToTarget}
           />
@@ -204,6 +296,65 @@ export const App: React.FC = () => {
 
         {/* Right Side: Shortlist Table & Gap Clusters */}
         <aside className="sidebar-shortlist">
+          {/* Candidate parameter editor card */}
+          {selectedCandidate && (
+            <div className="candidate-inspector-card">
+              <div className="inspector-header">
+                <div>
+                  <span className="inspector-tag">Selected Site</span>
+                  <strong>{selectedCandidate.id}</strong>
+                </div>
+                <button
+                  className="btn-delete-cand"
+                  onClick={() => handleDeleteCandidate(selectedCandidate.id)}
+                  title="Remove candidate site"
+                >
+                  Delete Site
+                </button>
+              </div>
+
+              <div className="inspector-controls-grid">
+                <div className="control-group">
+                  <label>Height: {(selectedCandidate as any).height_m || 30} m</label>
+                  <input
+                    type="range"
+                    min="15"
+                    max="60"
+                    step="5"
+                    value={(selectedCandidate as any).height_m || 30}
+                    onChange={(e) =>
+                      handleCandidateParamChange(selectedCandidate.id, 'height_m', Number(e.target.value))
+                    }
+                  />
+                </div>
+
+                <div className="control-group">
+                  <label>Power: {(selectedCandidate as any).power_dbm || 43} dBm</label>
+                  <input
+                    type="range"
+                    min="30"
+                    max="50"
+                    step="1"
+                    value={(selectedCandidate as any).power_dbm || 43}
+                    onChange={(e) =>
+                      handleCandidateParamChange(selectedCandidate.id, 'power_dbm', Number(e.target.value))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="inspector-coords">
+                Lat: {selectedCandidate.lat.toFixed(5)}°N, Lon: {selectedCandidate.lon.toFixed(5)}°E
+              </div>
+            </div>
+          )}
+
+          <div className="sidebar-action-bar">
+            <button className="btn-add-cand" onClick={handleAddCandidate} title="Place a new candidate tower">
+              + Add Candidate Tower
+            </button>
+          </div>
+
           <ShortlistTable
             candidates={candidates}
             clusters={clusters}
