@@ -98,6 +98,7 @@ export const CoverageMap: React.FC<MapProps> = ({
       mapRef.current = map;
       if (import.meta.env.DEV) {
         (window as any).__map = map;
+        (window as any).__getOverriddenIds = () => Array.from(previousOverriddenRef.current);
       }
 
       // Expose console helper for testing feature state

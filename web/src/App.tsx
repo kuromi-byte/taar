@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Header } from './components/Header';
 import { CounterPanel } from './components/CounterPanel';
 import { ShortlistTable } from './components/ShortlistTable';
@@ -7,9 +7,12 @@ import { BriefModal } from './components/BriefModal';
 import { LimitationsModal } from './components/LimitationsModal';
 import { DATA_CONFIG } from './config/data';
 import { Candidate, Cluster, RecomputeRequest, RecomputeResponse } from './types/contracts';
+import { RequestSequenceGuard } from './utils/requestSequence';
 
 export const App: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const candidatesRef = useRef<Candidate[]>([]);
+  candidatesRef.current = candidates;
   const [initialCandidates, setInitialCandidates] = useState<Candidate[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | number | null>(null);
@@ -29,6 +32,9 @@ export const App: React.FC = () => {
   // Modals
   const [activeBriefCluster, setActiveBriefCluster] = useState<Cluster | null>(null);
   const [showLimitationsModal, setShowLimitationsModal] = useState<boolean>(false);
+
+  // Request sequence counter / guard to drop out-of-order responses
+  const requestSeqRef = useRef<RequestSequenceGuard>(new RequestSequenceGuard());
 
   // 1. Initial Data Fetch
   useEffect(() => {
@@ -85,6 +91,7 @@ export const App: React.FC = () => {
 
   // 2. Perform Recompute against FastAPI Backend using EXACT contract shape
   const runRecompute = useCallback(async (currentCandidates: Candidate[]) => {
+    const seq = requestSeqRef.current.next();
     setIsRecomputing(true);
     setApiError(null);
 
@@ -110,6 +117,13 @@ export const App: React.FC = () => {
       }
 
       const resData: RecomputeResponse = await response.json();
+
+      // Guard against out-of-order stale responses
+      if (!requestSeqRef.current.isLatest(seq)) {
+        console.log(`[Recompute] Ignored out-of-order response #${seq} (latest is #${requestSeqRef.current.current()})`);
+        return;
+      }
+
       setApiConnected(true);
 
       // Contract response: {"changed": [[cell_id, dbm], ...], "newly_covered_pop": N, "total_unserved_pop": M}
@@ -118,12 +132,15 @@ export const App: React.FC = () => {
       setTotalUnservedPop(resData.total_unserved_pop);
       setShowModeled(true);
     } catch (err: any) {
+      if (!requestSeqRef.current.isLatest(seq)) return;
       // Contract rule: "If the API call fails, show a clear error and keep the previous map state."
       console.warn('API recompute failed; preserving previous map state:', err);
       setApiConnected(false);
       setApiError(`Recompute failed: ${err.message || 'API endpoint unavailable'}. Preserving previous map state.`);
     } finally {
-      setIsRecomputing(false);
+      if (requestSeqRef.current.isLatest(seq)) {
+        setIsRecomputing(false);
+      }
     }
   }, []);
 
@@ -137,25 +154,36 @@ export const App: React.FC = () => {
   // 3. Candidate Drag Handler (Fires strictly on marker DROP)
   const handleCandidateMove = useCallback(
     (id: string | number, newLat: number, newLon: number) => {
-      setCandidates((prev) => {
-        const updated = prev.map((c) => {
-          if (c.id === id) {
-            return {
-              ...c,
-              lat: Number(newLat.toFixed(6)),
-              lon: Number(newLon.toFixed(6)),
-            };
-          }
-          return c;
-        });
-
-        // Trigger live recompute on drop
-        runRecompute(updated);
-        return updated;
+      const updatedList = candidatesRef.current.map((c) => {
+        if (c.id === id) {
+          return {
+            ...c,
+            lat: Number(newLat.toFixed(6)),
+            lon: Number(newLon.toFixed(6)),
+          };
+        }
+        return c;
       });
+      candidatesRef.current = updatedList;
+      setCandidates(updatedList);
+
+      // Trigger live recompute on drop (outside setState updater so React Dev mode doesn't double-invoke)
+      runRecompute(updatedList);
     },
     [runRecompute]
   );
+
+  // Expose dev helpers for automated tests
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as any).__appState = {
+      candidates,
+      newlyCoveredPop,
+      totalUnservedPop,
+      isRecomputing,
+      apiConnected,
+      handleCandidateMove,
+    };
+  }
 
   // 4. Update Candidate Parameters (height_m, power_dbm)
   const handleCandidateParamChange = useCallback(

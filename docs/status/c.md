@@ -74,4 +74,66 @@
 - [x] Dev A & B: `web/public/data/cells.geojson` verified (900 features, integer IDs, WGS84 polygons within Sakleshpur box).
 - [x] Dev B: Draggable candidate markers and shortlist table wired with click-to-zoom and briefing generator.
 - [x] Dev C: Idempotent `applyRecompute` pure function and test suite verified.
+- [x] Dev C: Task 2 Double-Drag Test & API Contract Verification (CDP automation, request sequence guard, stale footprint elimination).
 - [ ] Dev B: Run FastAPI backend concurrently (`uvicorn api.main:app --port 8000`) for live multi-tower what-if testing.
+
+## Task 2 Double-Drag Test & Contract Verification [MOCK HANDLER]
+
+### A. API Reachability & CORS
+- **Host Environment Check**: Attempted `uvicorn api.main:app --port 8000`. Python 3.14 on host system lacks `uvicorn`, `fastapi`, `numpy`, and `rasterio` (Python environment owned by Dev A/B). Per Section A.1 rule, real-API startup stopped and evaluated against the mock handler on port 8000 labeled **MOCK HANDLER**.
+- **CORS Verification**: `OPTIONS http://localhost:8000/recompute` and `GET /docs` tested from `http://localhost:5173`. Confirmed header `Access-Control-Allow-Origin: *` -> **PASS**.
+
+### B. Contract Checks (No UI Fetch / Curl) [MOCK HANDLER]
+1. **Empty Towers (`POST {"towers": []}`)**:
+   - Response: `changed: []`, `newly_covered_pop: 0`, `total_unserved_pop: 364,978`.
+   - Independent baseline gap pop from `cells.geojson` (cells with `state == "gap"`): **361,044**.
+   - **Finding (Mismatch)**: `total_unserved_pop` (364,978) vs independent gap pop (361,044) is a difference of **3,934**. This exactly equals the population of the 189 `unknown` cells whose baseline dBm is `null` (< -106 dBm). The API counts all cells below -106 dBm as unserved regardless of whether `state` is `"gap"` or `"unknown"`.
+2. **First Candidate Tower (`CAND-09`: lat 12.960828, lon 75.774295, height_m 30.0, power_dbm 43.0)**:
+   - Response time: **24.8 ms**.
+   - `changed` count: **2,653 cells**.
+   - `newly_covered_pop`: **38,141**.
+   - `total_unserved_pop`: **326,837** (364,978 - 38,141 = 326,837).
+3. **Newly Covered Population Check**:
+   - Independent calculation from `cells.geojson` (cells in `changed` with baseline state `"gap"` and new dBm $\ge -94.0\text{ dBm}$ [`gap_threshold + uncertain_band`]): **5,010**.
+   - Server `newly_covered_pop`: **38,141**.
+   - **Finding (Mismatch)**: Server classifies any cell lifted to $\ge -106.0\text{ dBm}$ (above gap threshold - margin) as newly covered (`now_covered = effective_dbm >= -106.0`), whereas strict covered band $\ge -94.0\text{ dBm}$ captures only high-confidence coverage. Reported as contract finding, not modified.
+4. **Idempotence & Footprint Overlap**:
+   - Duplicate request: identical responses -> **PASS (Idempotent)**.
+   - Moved tower (~3 km away at `12.975, 75.782`): Footprint 1 has 2,653 cells; Footprint 2 has 2,601 cells; intersection is 1,859 cells. Exactly **794 cells** from Footprint 1 are absent in Footprint 2 (candidate footprint successfully shifted).
+5. **Contract Edge Cases**:
+   - Tower far outside taluk (`0.0, 0.0`): HTTP 200 OK (`changed: []`, `newly_covered_pop: 0`, `total_unserved_pop: 364,978`). Shape valid -> **PASS**.
+   - Extra unknown fields (`{"towers": [...], "foo": "bar"}`): HTTP 200 OK. Shape valid -> **PASS**.
+   - Missing `height_m`: HTTP 200 OK (server defaults to 30.0m). Shape valid -> **PASS**.
+
+### C. Browser Double-Drag Automation (CDP in Headless Chromium) [MOCK HANDLER]
+Automated via [`scratch/run_double_drag_cdp.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/run_double_drag_cdp.mjs):
+- **Request Throttling (Drag vs Drop)**:
+  - Intercepted network requests over 20 discrete mousemove steps: **0 `/recompute` requests** during drag movement -> **PASS**.
+  - On mouse release (Drop): **EXACTLY ONE `/recompute` request** triggered -> **PASS**.
+  - Payload audit: contains only the 5 candidate towers with valid coordinates -> **PASS**.
+- **Drop 1 Verification (Point P1: `12.965, 75.778`)**:
+  - Overridden cells populated: **3,967 cells**.
+  - Sample cells verified with numeric `dbm` feature-state. Counter panel updated to `55,155` newly covered -> **PASS**.
+  - Screenshot: [`web/e2e-output/drop1.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop1.png) (92.3 KB).
+- **Drop 2 Verification (Point P2: ~3 km away at `12.975, 75.782`)**:
+  - Overridden cells populated: **4,083 cells**.
+  - Union footprint audit across 4,103 cells:
+    - Active cells in Drop 2: **4,083** all have valid `dbm` feature-state -> **PASS**.
+    - Dropped cells only in Drop 1: `staleFound === 0` (all stale feature-state completely removed) -> **PASS**.
+  - Screenshot: [`web/e2e-output/drop2.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop2.png) (93.1 KB).
+- **Far-Away Drop (Footprint Cleared)**:
+  - Candidates moved outside taluk (`changed = []`):
+    - `newlyCoveredPop === 0` -> **PASS**.
+    - Overridden IDs count: **0** -> **PASS**.
+    - All cell feature-states cleared: **PASS**.
+  - Screenshot: [`web/e2e-output/drop_far.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop_far.png) (90.8 KB).
+- **Rapid Double-Drop (<100 ms) & Out-of-Order Guard**:
+  - Built pure [`RequestSequenceGuard`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/src/utils/requestSequence.ts) with monotonic sequence counters.
+  - Triggered Drop A and Drop B separated by 30 ms. Intermediate out-of-order response was safely ignored; final map state converged exactly on the last drop (`CAND-09` at `12.975, 75.782`, 2,659 cells, 35,644 newly covered) -> **PASS**.
+- **React Dev Mode Bug Discovery & Fix**:
+  - Identified that calling `runRecompute` inside `setCandidates(prev => ...)` caused double-invocation under React 18 development mode.
+  - Fixed in [`App.tsx`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/src/App.tsx) by holding `candidatesRef.current`, updating the ref synchronously, and calling `runRecompute` outside the React setState updater.
+
+### D. Verification & Build
+- Vitest: **25 / 25 unit tests passed** across all 5 test files (`styleExpressions`, `recompute`, `params`, `components`, `requestSequence`).
+- Production build: `npm run build` completed cleanly; `dist/assets/*.js` contains **0 occurrences** of `__bench` (tree-shaking verified).
