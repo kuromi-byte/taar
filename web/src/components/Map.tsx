@@ -5,6 +5,7 @@ import { DATA_CONFIG } from '../config/data';
 import { params } from '../config/params';
 import { Candidate, Town } from '../types/contracts';
 import { applyRecompute } from '../utils/recompute';
+import { buildCellColorExpression } from '../utils/styleExpressions';
 
 interface ExistingTower {
   id: number | string;
@@ -168,35 +169,7 @@ export const CoverageMap: React.FC<MapProps> = ({
           type: 'fill',
           source: 'cells',
           paint: {
-            'fill-color': [
-              'case',
-              // 1. Cells with state 'unknown' or 'Unknown' are grey (never gaps)
-              [
-                'any',
-                ['==', ['get', 'state'], 'unknown'],
-                ['==', ['get', 'state'], 'Unknown'],
-              ],
-              '#6b7280', // Slate grey
-
-              // 2. Likely covered: signal >= threshold + band
-              [
-                '>=',
-                ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0],
-                coveredThreshold,
-              ],
-              '#10b981', // Emerald green
-
-              // 3. Uncertain band: threshold - band <= signal < threshold + band
-              [
-                '>=',
-                ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0],
-                gapThreshold,
-              ],
-              '#f59e0b', // Amber
-
-              // 4. Likely gap: signal < threshold - band
-              '#ef4444', // Red
-            ],
+            'fill-color': buildCellColorExpression(coveredThreshold, gapThreshold) as any,
             'fill-opacity': 0.65,
           },
         });
@@ -222,7 +195,7 @@ export const CoverageMap: React.FC<MapProps> = ({
           const baseDbm =
             props.baseline_dbm !== undefined && props.baseline_dbm !== null
               ? `${props.baseline_dbm} dBm`
-              : 'None (Beyond model radius)';
+              : 'No modeled signal';
           const state = props.state || 'Unknown';
 
           new Popup({ closeButton: true, className: 'dark-popup' })

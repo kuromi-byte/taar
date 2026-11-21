@@ -4,6 +4,7 @@
 import { DATA_CONFIG } from '../config/data';
 import { params } from '../config/params';
 import { applyRecompute } from '../utils/recompute';
+import { buildCellColorExpression } from '../utils/styleExpressions';
 
 export interface BenchOptions {
   cells?: number;
@@ -18,6 +19,7 @@ export interface BenchmarkMetrics {
   unknownGreyVerified: boolean;
   load: {
     fetchParseMs: number;
+    fileSizeMb?: number;
     drawToIdleMs: number;
     totalLoadMs: number;
     targetPass: boolean;
@@ -214,6 +216,7 @@ export async function runBenchmark(options?: BenchOptions): Promise<BenchmarkMet
   let activeLayer = 'cells-fill';
   let isTempLayer = false;
   let unknownCellsCount = 0;
+  let fileSizeMb: number | undefined;
 
   const coveredThreshold = params.gap_threshold_dbm + params.uncertain_band_db;
   const gapThreshold = params.gap_threshold_dbm - params.uncertain_band_db;
@@ -256,16 +259,7 @@ export async function runBenchmark(options?: BenchOptions): Promise<BenchmarkMet
       type: 'fill',
       source: activeSource,
       paint: {
-        'fill-color': [
-          'case',
-          ['any', ['==', ['get', 'state'], 'unknown'], ['==', ['get', 'state'], 'Unknown']],
-          '#6b7280', // Slate grey (never gap)
-          ['>=', ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0], coveredThreshold],
-          '#10b981', // Covered green
-          ['>=', ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0], gapThreshold],
-          '#f59e0b', // Uncertain amber
-          '#ef4444', // Gap red
-        ],
+        'fill-color': buildCellColorExpression(coveredThreshold, gapThreshold) as any,
         'fill-opacity': 0.65,
       },
     });
@@ -273,10 +267,12 @@ export async function runBenchmark(options?: BenchOptions): Promise<BenchmarkMet
     await waitForMapIdle(map);
     drawToIdleMs = performance.now() - tDrawStart;
   } else {
-    // Standard test on cells.geojson
+    // Standard test on cells.geojson (REAL dataset)
     const tFetchStart = performance.now();
     const res = await fetch(DATA_CONFIG.paths.cells);
-    const cellsGeoJson = await res.json();
+    const text = await res.text();
+    fileSizeMb = Number((new Blob([text]).size / (1024 * 1024)).toFixed(2));
+    const cellsGeoJson = JSON.parse(text);
     fetchParseMs = performance.now() - tFetchStart;
 
     features = cellsGeoJson.features || [];
@@ -466,6 +462,7 @@ export async function runBenchmark(options?: BenchOptions): Promise<BenchmarkMet
       unknownGreyVerified,
       load: {
         fetchParseMs: Number(fetchParseMs.toFixed(2)),
+        fileSizeMb,
         drawToIdleMs: Number(drawToIdleMs.toFixed(2)),
         totalLoadMs: Number(totalLoadMs.toFixed(2)),
         targetPass: initialLoadPass,
