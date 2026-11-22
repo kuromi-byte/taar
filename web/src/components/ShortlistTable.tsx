@@ -9,6 +9,9 @@ interface ShortlistTableProps {
   onSelectCandidate: (candidate: Candidate) => void;
   onSelectCluster: (cluster: Cluster) => void;
   onGenerateBrief: (cluster: Cluster) => void;
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export const ShortlistTable: React.FC<ShortlistTableProps> = ({
@@ -19,8 +22,39 @@ export const ShortlistTable: React.FC<ShortlistTableProps> = ({
   onSelectCandidate,
   onSelectCluster,
   onGenerateBrief,
+  isLoading = false,
+  error = null,
+  onRetry,
 }) => {
   const [activeTab, setActiveTab] = useState<'candidates' | 'clusters'>('candidates');
+
+  if (isLoading) {
+    return (
+      <div className="shortlist-container">
+        <div className="shortlist-loading" role="status">
+          <span className="loading-spinner"></span>
+          <span>Loading candidate sites...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="shortlist-container">
+        <div className="shortlist-error-state" role="alert">
+          <div className="shortlist-error-icon">⚠️</div>
+          <div className="shortlist-error-title">Failed to load candidate sites</div>
+          <p className="shortlist-error-desc">{error}</p>
+          {onRetry && (
+            <button className="btn-secondary" onClick={onRetry}>
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shortlist-container">

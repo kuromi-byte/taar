@@ -21,4 +21,25 @@ export const DATA_CONFIG = {
 
   // Taluk Pilot metadata derived dynamically from /contracts/config.json via params.ts
   pilot: pilotConfig,
+
+  // Recompute timing thresholds
+  SLOW_MS: 1500,
+  TIMEOUT_MS: 15000,
+
+  getSlowMs(): number {
+    if (import.meta.env.DEV && typeof window !== 'undefined' && (window as any).__DEV_SLOW_MS != null) {
+      return (window as any).__DEV_SLOW_MS;
+    }
+    return this.SLOW_MS;
+  },
+
+  getTimeoutMs(): number {
+    if (import.meta.env.DEV && typeof window !== 'undefined' && (window as any).__DEV_TIMEOUT_MS != null) {
+      return (window as any).__DEV_TIMEOUT_MS;
+    }
+    return this.TIMEOUT_MS;
+  },
 };
+
+export const SLOW_MS = DATA_CONFIG.SLOW_MS;
+export const TIMEOUT_MS = DATA_CONFIG.TIMEOUT_MS;

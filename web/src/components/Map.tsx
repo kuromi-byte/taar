@@ -3,8 +3,10 @@ import maplibregl, { Map as MapLibreMap, Marker, Popup } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { DATA_CONFIG } from '../config/data';
 import { params } from '../config/params';
+import { STATE_COLORS } from '../config/stateColors';
 import { Candidate, Town } from '../types/contracts';
 import { applyRecompute } from '../utils/recompute';
+import { buildCellColorExpression } from '../utils/styleExpressions';
 
 interface ExistingTower {
   id: number | string;
@@ -26,6 +28,8 @@ interface MapProps {
   overriddenDbmMap?: Map<number, number>;
   showModeled: boolean;
   flyToTarget: { lat: number; lon: number } | null;
+  cellsError?: string | null;
+  onRetryCells?: () => void;
 }
 
 export const CoverageMap: React.FC<MapProps> = ({
@@ -37,6 +41,8 @@ export const CoverageMap: React.FC<MapProps> = ({
   overriddenDbmMap,
   showModeled,
   flyToTarget,
+  cellsError = null,
+  onRetryCells,
 }) => {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -97,10 +103,11 @@ export const CoverageMap: React.FC<MapProps> = ({
       mapRef.current = map;
       if (import.meta.env.DEV) {
         (window as any).__map = map;
+        (window as any).__getOverriddenIds = () => Array.from(previousOverriddenRef.current);
       }
 
       // Expose console helper for testing feature state
-      (window as any).testRecolorCell = (cellId: number = 0, dbm: number = -75.0) => {
+      (window as any).testRecolorCell = (cellId: number = 1, dbm: number = -75.0) => {
         if (!mapRef.current) return;
         mapRef.current.setFeatureState({ source: 'cells', id: cellId }, { dbm });
         previousOverriddenRef.current.add(cellId);
@@ -168,36 +175,8 @@ export const CoverageMap: React.FC<MapProps> = ({
           type: 'fill',
           source: 'cells',
           paint: {
-            'fill-color': [
-              'case',
-              // 1. Cells with state 'unknown' or 'Unknown' are grey (never gaps)
-              [
-                'any',
-                ['==', ['get', 'state'], 'unknown'],
-                ['==', ['get', 'state'], 'Unknown'],
-              ],
-              '#6b7280', // Slate grey
-
-              // 2. Likely covered: signal >= threshold + band
-              [
-                '>=',
-                ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0],
-                coveredThreshold,
-              ],
-              '#10b981', // Emerald green
-
-              // 3. Uncertain band: threshold - band <= signal < threshold + band
-              [
-                '>=',
-                ['coalesce', ['feature-state', 'dbm'], ['get', 'baseline_dbm'], -999.0],
-                gapThreshold,
-              ],
-              '#f59e0b', // Amber
-
-              // 4. Likely gap: signal < threshold - band
-              '#ef4444', // Red
-            ],
-            'fill-opacity': 0.65,
+            'fill-color': buildCellColorExpression(coveredThreshold, gapThreshold) as any,
+            'fill-opacity': 0.75,
           },
         });
 
@@ -219,7 +198,10 @@ export const CoverageMap: React.FC<MapProps> = ({
           const props = feat.properties || {};
           const cellId = feat.id;
           const pop = props.pop || 'N/A';
-          const baseDbm = props.baseline_dbm !== undefined ? `${props.baseline_dbm} dBm` : 'Unknown';
+          const baseDbm =
+            props.baseline_dbm !== undefined && props.baseline_dbm !== null
+              ? `${props.baseline_dbm} dBm`
+              : 'No modeled signal';
           const state = props.state || 'Unknown';
 
           new Popup({ closeButton: true, className: 'dark-popup' })
@@ -423,7 +405,7 @@ export const CoverageMap: React.FC<MapProps> = ({
           className="btn-dev-recolor"
           onClick={() => {
             if ((window as any).testRecolorCell) {
-              (window as any).testRecolorCell(0, -78.0);
+              (window as any).testRecolorCell(1, -78.0);
             }
           }}
           title="Dev-only helper: calls setFeatureState on cell #0 to verify data-driven recolor"
@@ -455,25 +437,41 @@ export const CoverageMap: React.FC<MapProps> = ({
         </div>
       )}
 
+      {/* Full-panel Error Overlay when cells.geojson fails to load */}
+      {cellsError && (
+        <div className="full-panel-error" role="alert">
+          <div className="full-panel-error-card">
+            <div className="error-icon-large">⚠️</div>
+            <h2 className="error-title">Failed to load coverage data</h2>
+            <p className="error-desc">{cellsError}</p>
+            {onRetryCells && (
+              <button className="btn-primary" onClick={onRetryCells}>
+                Retry
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Floating Map Legend */}
       <div className="map-floating-legend">
         <div className="legend-title">Signal Classification</div>
         <div className="legend-items">
           <div className="legend-item">
-            <span className="color-swatch covered"></span>
-            <span>Covered (&ge; {coveredThreshold.toFixed(0)} dBm)</span>
+            <span className="color-swatch covered" style={{ backgroundColor: STATE_COLORS.covered }}></span>
+            <span>Likely covered (&ge; {coveredThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch uncertain"></span>
+            <span className="color-swatch uncertain" style={{ backgroundColor: STATE_COLORS.uncertain }}></span>
             <span>Uncertain ({gapThreshold.toFixed(0)} to {coveredThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch gap"></span>
-            <span>Gap (&lt; {gapThreshold.toFixed(0)} dBm)</span>
+            <span className="color-swatch gap" style={{ backgroundColor: STATE_COLORS.gap }}></span>
+            <span>Likely gap (&lt; {gapThreshold.toFixed(0)} dBm)</span>
           </div>
           <div className="legend-item">
-            <span className="color-swatch unknown"></span>
-            <span>Unknown (No Tower Evidence)</span>
+            <span className="color-swatch unknown" style={{ backgroundColor: STATE_COLORS.unknown }}></span>
+            <span>Unknown: no tower evidence</span>
           </div>
           <div className="legend-divider"></div>
           <div className="legend-item">

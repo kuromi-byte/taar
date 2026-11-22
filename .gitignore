@@ -25,5 +25,7 @@ node_modules/
 dist/
 web/node_modules/
 web/dist/
+web/e2e-output/
+scratch/
 .DS_Store
 *.local
