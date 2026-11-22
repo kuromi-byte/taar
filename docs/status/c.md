@@ -370,3 +370,103 @@ All test states captured in [`web/e2e-output/`](file:///c:/Users/20635/OneDrive/
 - **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files (`recompute`, `validateRecompute`, `recomputeStatus`, `styleExpressions`, `requestSequence`, `components`, `params`).
 - **Production Build**: `tsc && vite build` completed cleanly in 7.31s.
 - **Tree-Shaking Verification**: `dist/assets/*.js` contains **0 occurrences** of `__bench`.
+
+## Task 1d: Data Re-Audit [NEW cells.geojson from Dev A]
+
+### A. Before / After Cell Counts & State Breakdown
+Audit executed via [`scratch/audit_task1d.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/audit_task1d.mjs) on [`web/public/data/cells.geojson`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/public/data/cells.geojson).
+
+| Property / Category | Previous Audit (Task 1c) | New Audit (Task 1d) | Change |
+| :--- | :---: | :---: | :---: |
+| **File Size** | 4,366,000 B (4.16 MB) | **4,395,655 B (4.19 MB)** | +29,655 B (+0.03 MB) |
+| **Total Feature Count** | 11,394 | **11,394** | 0 (Unchanged) |
+| **ID Range** | 1 .. 11,394 | **1 .. 11,394** | Continuous 1-based integers |
+| **Duplicate / Non-Integer IDs** | 0 / 0 | **0 / 0** | Validated clean |
+| **Covered Cells** ($\ge -94\text{ dBm}$) | 308 (2.7%) | **3,920 (34.4%)** | **+3,612** cells |
+| **Uncertain Cells** ($-106 \le \text{dBm} < -94$) | 721 (6.3%) | **5,235 (45.9%)** | **+4,514** cells |
+| **Gap Cells** ($< -106\text{ dBm}$ / unmodeled) | 10,176 (89.3%) | **2,050 (18.0%)** | **-8,126** cells |
+| **Unknown Cells** (No tower evidence) | 189 (1.7%) | **189 (1.7%)** | 0 (Unchanged) |
+| **Gap Cells with `baseline_dbm == null`** | 2,050 (20.1% of gaps) | **2,050 (100% of gaps)** | All 2,050 gap cells are null dBm |
+| **Gap Cells with non-null `baseline_dbm`** | 8,126 | **0** | **-8,126** (all promoted to uncertain/covered) |
+| **Unknown Cells with `baseline_dbm == null`** | 189 (100%) | **189 (100%)** | 0 (All unknown cells remain null dBm) |
+| **Property Schema Keys** | 10 keys | **10 keys** | 0 added, 0 removed |
+
+- **Property Schema**: Identical set of 10 keys: `id`, `pop`, `cx`, `cy`, `elev_m`, `slope_deg`, `road_km`, `tower_evidence`, `baseline_dbm`, `state`.
+- **Meta (Full)**:
+  ```json
+  {
+    "source": "worldpop",
+    "model": "Okumura-Hata/COST-231 + Polar Sweep Shadowing",
+    "frequency_mhz": 900,
+    "eirp_dbm": 43,
+    "gap_threshold_dbm": -100,
+    "uncertain_band_db": 6
+  }
+  ```
+
+### B. File Integrity & Hash Comparison
+- **`web/public/data/cells.geojson` SHA-256**: `c0ba3d7fb84807afd2cb96ddb4f6bd234ae743f4c5120879d21c0f5b212fa03d`
+- **`data/processed/cells.geojson` SHA-256**: `c0ba3d7fb84807afd2cb96ddb4f6bd234ae743f4c5120879d21c0f5b212fa03d`
+- **Verdict**: **IDENTICAL** (Byte-for-byte SHA-256 match).
+
+### C. Cross-File Consistency & Discrepancy Findings
+1. **Cluster Cell References**:
+   - Total clusters: 5 (`CL-01` to `CL-05`).
+   - Cluster `cell_ids` count: 4,934 total references (ID range: `16 .. 10099`).
+   - Missing cluster cell references in `cells.geojson`: **0** (100% referential integrity).
+2. **Candidate Cluster References**:
+   - Total candidates: 5 (`CAND-09`, `CAND-011`, `CAND-02`, `CAND-05`, `CAND-08`).
+   - Candidates pointing to invalid cluster ID: **0**.
+3. **Cluster Population Discrepancy (Finding)**:
+   - In Dev A's new model run, all 4,934 cells contained in clusters `CL-01` through `CL-05` have been modeled with signal $\ge -106\text{ dBm}$ (now classified as `uncertain` or `covered`), leaving **0 cells** with `state: "gap"` inside any cluster.
+   - Summing population over `state === "gap"` per cluster now yields **0** across all 5 clusters, while `clusters.json` records previous baseline gap populations (`CL-01`: 23,545, `CL-02`: 48,943, `CL-03`: 43,074, `CL-04`: 17,376, `CL-05`: 50,641).
+   - `computed_sum_total_pop` across cluster cells matches `recorded_pop_in_gap` exactly, confirming the clusters were generated from the previous model run.
+   - Candidates' `added_pop` remains mathematically $\le$ `cluster.pop_in_gap`.
+
+### D. Parameter Agreement Check
+- `/contracts/config.json`: `gap_threshold_dbm: -100`, `uncertain_band_db: 6`.
+- `cells.geojson` meta: `gap_threshold_dbm: -100`, `uncertain_band_db: 6`.
+- `web/src/config/params.ts`: loads `-100` and `6`.
+- **Verdict**: **100% MATCH** across all configurations.
+
+### E. 5-Category Pixel Sampling & Feature-State Verification
+Tested in headless browser via CDP ([`test_pixel_task1d.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/test_pixel_task1d.mjs)) with 1920x1080 viewport and re-selected cell IDs from the new file:
+
+| Category | Real Cell ID | Signal Note | Expected RGB | Sampled Actual RGB | Max Channel Diff | Status |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| **Covered** | 668 | baseline `-63.7 dBm` | `rgb(14, 142, 102)` | `rgb(15, 144, 104)` | 2 (tol $\le 12$) | **PASS** |
+| **Uncertain** | 11 | baseline `-105.0 dBm` | `rgb(186, 122, 14)` | `rgb(187, 124, 15)` | 2 (tol $\le 12$) | **PASS** |
+| **Gap (Null dBm)** | 1 | baseline `null`, gap state | `rgb(182, 54, 57)` | `rgb(182, 56, 58)` | 2 (tol $\le 12$) | **PASS** |
+| **Gap (Explicit dBm)** | 1 | feature-state `-115.0 dBm` | `rgb(182, 54, 57)` | `rgb(182, 56, 58)` | 2 (tol $\le 12$) | **PASS** |
+| **Unknown** | 8737 | baseline `null`, unknown state | `rgb(83, 89, 102)` | `rgb(83, 91, 103)` | 2 (tol $\le 12$) | **PASS** |
+
+- **Feature-State Override Tests**:
+  - Unknown cell #8737 with `-80.0 dBm` override: Sampled `rgb(83, 91, 103)` (Expected grey `rgb(83, 89, 102)`, max diff 2) -> **PASS (Remains Grey)**.
+  - Gap cell #1 with `-80.0 dBm` override: Sampled `rgb(15, 144, 104)` (Expected green `rgb(14, 142, 102)`, max diff 2) -> **PASS (Turns Covered Green)**.
+
+### F. Real Hardware GPU Benchmark (Qualcomm Adreno X1-45)
+- **Renderer**: `ANGLE (Qualcomm, Qualcomm(R) Adreno(TM) X1-45 GPU (0x37314430) Direct3D11 vs_5_0 ps_5_0, D3D11)`
+- **Dataset**: 11,394 cells (`cells.geojson`, 4.19 MB).
+
+| Benchmark Metric | Measured Value | Target | Status |
+| :--- | :---: | :---: | :---: |
+| **Fetch & Parse** | **36.70 ms** | - | - |
+| **Draw to Idle** | **25.10 ms** | - | - |
+| **Initial Load Total** | **61.80 ms** | < 3,000 ms | **PASS** |
+| **Render Frames (3s test)** | **181 frames** | - | - |
+| **Average FPS (Measured)** | **60.00 FPS** | $\ge 30.0$ FPS | **PASS** |
+| **Unrounded FPS (Raw)** | **`60.00331510028178 FPS`** | $\ge 30.0$ FPS | **PASS** |
+| **Worst Frame Time** | **16.80 ms** | - | Steady 60 Hz |
+| **Average Frame Time** | **16.67 ms** | - | V-Sync Locked |
+| **Pilot 10 km Radius ($N$)** | **3,345 cells** | - | - |
+| **`setFeatureState` Loop (Median / p95)** | **0.70 ms / 1.11 ms** | - | - |
+| **`setFeatureState` + Idle (Median / p95)** | **16.70 ms / 19.53 ms** | < 100 ms | **PASS** |
+| **`removeFeatureState` Loop / Idle (Median)**| **0.45 ms / 16.70 ms** | - | - |
+| **`applyRecompute` Loop / Idle (Median)** | **0.80 ms / 16.75 ms** | - | - |
+| **Shrinking Response Clear Check** | **Confirmed** (`shrinkingConfirmed: true`) | All dropped IDs cleared | **PASS** |
+| **Overall Performance Targets** | - | All Pass | **PASS** |
+
+### G. Test Suite & Production Build
+- **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files in 11.00s.
+- **Production Build**: `tsc && vite build` completed in 3.06s.
+- **Tree-Shaking**: **0 occurrences** of `__bench` in `dist/`.
