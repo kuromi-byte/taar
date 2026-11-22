@@ -28,6 +28,7 @@ from pipeline.model.cfg_loader import load_config, get_repo_root
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
 from pipeline.model.engine import compute_signal
+from pipeline.ranking.coverage import compute_coverage
 
 REPO_ROOT = get_repo_root()
 
@@ -316,12 +317,7 @@ def generate_clusters_and_candidates():
         print(f"  {cid} ({cluster_name:<24}): {len(comp):>4} gap cells, pop={comp_pop:>6,}, {status_str}")
 
     # 7. Elevation Prominence Scoring & Greedy Ranking
-    print("\nRanking surviving candidates greedily with real compute_signal engine...")
-    gap_cutoff = cfg.gap_threshold_dbm - cfg.uncertain_margin_db
-
-    # Baseline working signal (NaN treated safely as -inf)
-    current_signal = baseline_dbm.copy()
-    current_signal = np.where(np.isnan(current_signal), -np.inf, current_signal)
+    print("\nRanking surviving candidates greedily with shared compute_coverage engine...")
 
     # Flatten candidate pool from clusters having viable candidates
     all_viable = []
@@ -331,36 +327,44 @@ def generate_clusters_and_candidates():
     # Sort candidates by elevation prominence descending
     all_viable.sort(key=lambda c: -c["prominence_m"])
 
-    # To optimize greedy search while checking top sites thoroughly, evaluate top prominence sites
-    candidate_pool = all_viable[:30] if len(all_viable) > 30 else list(all_viable)
+    # Evaluate top prominence sites for greedy search
+    candidate_pool = all_viable[:35] if len(all_viable) > 35 else list(all_viable)
     selected_ranked_candidates: List[Dict[str, Any]] = []
 
+    chosen_towers: List[Dict[str, Any]] = []
+    current_cov = 0
     target_k = min(_TOP_K, len(candidate_pool))
+
     for rank in range(1, target_k + 1):
         best_cand = None
         best_boost = -1
-        best_cand_sig = None
+        best_total_cov = -1
 
         for cand in candidate_pool:
-            tower_spec = [{
+            tower_candidate = {
                 "id": cand["cluster_id"],
                 "lat": cand["lat"],
                 "lon": cand["lon"],
                 "height": cand["height"],
                 "power": cand["power"],
-            }]
-            sig_arr, _ = compute_signal(cells_fc, tower_spec, dem, cfg)
-            sig_safe = np.where(np.isnan(sig_arr), -np.inf, sig_arr)
-            effective = np.maximum(current_signal, sig_safe)
-
-            was_gap = current_signal < gap_cutoff
-            now_covered = effective >= gap_cutoff
-            added_pop = int(np.sum(cell_pops[was_gap & now_covered]))
+            }
+            trial_towers = chosen_towers + [tower_candidate]
+            cov_res = compute_coverage(
+                trial_towers,
+                dem=dem,
+                cfg=cfg,
+                cells_json=cells_fc,
+                baseline_dbm=np.where(np.isnan(baseline_dbm), -139.0, baseline_dbm),
+                baseline_states=cell_states,
+                cell_pops=cell_pops,
+                cell_ids=cell_ids,
+            )
+            added_pop = cov_res.newly_covered_pop - current_cov
 
             if added_pop > best_boost:
                 best_boost = added_pop
                 best_cand = cand
-                best_cand_sig = sig_safe
+                best_total_cov = cov_res.newly_covered_pop
 
         if best_cand is None or best_boost <= 0:
             print(f"  Greedy selection finished at rank {rank-1}: no remaining candidate adds unserved coverage.")
@@ -379,10 +383,17 @@ def generate_clusters_and_candidates():
 
         selected_ranked_candidates.append(best_cand)
         candidate_pool.remove(best_cand)
-        current_signal = np.maximum(current_signal, best_cand_sig)
+        chosen_towers.append({
+            "id": cand_id,
+            "lat": best_cand["lat"],
+            "lon": best_cand["lon"],
+            "height": best_cand["height"],
+            "power": best_cand["power"],
+        })
+        current_cov = best_total_cov
 
         print(f"  Rank {rank}: {cand_id} ({best_cand['cluster_name']}) -> "
-              f"+{best_boost:,} unserved pop, slope={best_cand['slope_deg']}°, "
+              f"+{best_boost:,} unserved pop (cum: {current_cov:,}), slope={best_cand['slope_deg']}°, "
               f"road={best_cand['road_km']}km, prom={best_cand['prominence_m']:+.1f}m")
 
     # 8. Build Contract 5: clusters.json
@@ -428,9 +439,11 @@ def generate_clusters_and_candidates():
         "items": clusters_output,
     }
 
-    # 10. Write outputs to pipeline/data (strictly within Dev B scope, not touching /web or /contracts)
+    # 10. Write outputs to pipeline/data (container format) and sync to web/public/data (plain array for frontend)
     pipeline_cand_path = REPO_ROOT / "pipeline" / "data" / "candidates.json"
     pipeline_clust_path = REPO_ROOT / "pipeline" / "data" / "clusters.json"
+    web_cand_path = REPO_ROOT / "web" / "public" / "data" / "candidates.json"
+    web_clust_path = REPO_ROOT / "web" / "public" / "data" / "clusters.json"
 
     pipeline_cand_path.parent.mkdir(parents=True, exist_ok=True)
     with open(pipeline_cand_path, "w", encoding="utf-8") as f:
@@ -439,7 +452,13 @@ def generate_clusters_and_candidates():
     with open(pipeline_clust_path, "w", encoding="utf-8") as f:
         json.dump(clusters_container, f, indent=2)
 
-    out_paths = [pipeline_cand_path, pipeline_clust_path]
+    if web_cand_path.parent.exists():
+        with open(web_cand_path, "w", encoding="utf-8") as f:
+            json.dump(candidates_output, f, indent=2)
+        with open(web_clust_path, "w", encoding="utf-8") as f:
+            json.dump(clusters_output, f, indent=2)
+
+    out_paths = [pipeline_cand_path, pipeline_clust_path, web_cand_path, web_clust_path]
 
     # 11. Print comprehensive report
     total_newly_covered = sum(c["added_pop"] for c in candidates_output)

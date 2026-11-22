@@ -1,92 +1,77 @@
 [
   {
-    "meta": {
-      "source": "mock"
-    },
-    "id": "CAND-09",
-    "cluster_id": "CL-03",
-    "lat": 12.960828,
-    "lon": 75.774295,
+    "id": "CAND-01",
+    "cluster_id": "CL-01",
+    "lat": 12.903751,
+    "lon": 75.751249,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 6936,
+    "added_pop": 880,
     "flags": {
-      "road_km": 0.12,
-      "slope_deg": 7.9,
-      "backhaul": "Fiber along road (125m)"
+      "road_km": 0.652,
+      "slope_deg": 5.1,
+      "backhaul": "Microwave LoS to Sakleshpur HQ"
     },
-    "why": "Captures 6,936 unserved residents in Anemahal cluster; local prominence +8.0m over valley; gentle slope (7.9\u00b0) with direct road access (0.12 km)."
+    "why": "Captures 880 unserved residents in the Near Shukravarasanthe area; local elevation prominence +47 m over surrounding terrain; slope 5.1\u00b0 (< 15.0\u00b0), direct road access 0.652 km."
   },
   {
-    "meta": {
-      "source": "mock"
-    },
-    "id": "CAND-011",
-    "cluster_id": "CL-03",
-    "lat": 12.986685,
-    "lon": 75.786336,
-    "height": 30.0,
-    "power": 43.0,
-    "added_pop": 4572,
-    "flags": {
-      "road_km": 0.32,
-      "slope_deg": 3.9,
-      "backhaul": "Fiber along road (316m)"
-    },
-    "why": "Captures 4,572 unserved residents in Anemahal cluster; local prominence +15.0m over valley; gentle slope (3.9\u00b0) with direct road access (0.32 km)."
-  },
-  {
-    "meta": {
-      "source": "mock"
-    },
     "id": "CAND-02",
     "cluster_id": "CL-01",
-    "lat": 12.950251,
-    "lon": 75.755233,
+    "lat": 12.90625,
+    "lon": 75.766249,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 1427,
+    "added_pop": 557,
     "flags": {
-      "road_km": 0.58,
-      "slope_deg": 5.7,
-      "backhaul": "Microwave LoS to Sakleshpur HQ"
+      "road_km": 0.323,
+      "slope_deg": 0.9,
+      "backhaul": "Fiber along road (323m)"
     },
-    "why": "Captures 1,427 unserved residents in Donigal cluster; local prominence +19.1m over valley; gentle slope (5.7\u00b0) with direct road access (0.58 km)."
+    "why": "Captures 557 unserved residents in the Near Shukravarasanthe area; local elevation prominence +34 m over surrounding terrain; slope 0.9\u00b0 (< 15.0\u00b0), direct road access 0.323 km."
   },
   {
-    "meta": {
-      "source": "mock"
-    },
-    "id": "CAND-05",
+    "id": "CAND-03",
     "cluster_id": "CL-01",
-    "lat": 12.945747,
-    "lon": 75.749228,
+    "lat": 12.90875,
+    "lon": 75.748749,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 708,
+    "added_pop": 188,
     "flags": {
-      "road_km": 0.21,
-      "slope_deg": 11.8,
-      "backhaul": "Fiber along road (207m)"
+      "road_km": 0.317,
+      "slope_deg": 6.3,
+      "backhaul": "Fiber along road (317m)"
     },
-    "why": "Captures 708 unserved residents in Donigal cluster; local prominence +18.5m over valley; gentle slope (11.8\u00b0) with direct road access (0.21 km)."
+    "why": "Captures 188 unserved residents in the Near Shukravarasanthe area; local elevation prominence +31 m over surrounding terrain; slope 6.3\u00b0 (< 15.0\u00b0), direct road access 0.317 km."
   },
   {
-    "meta": {
-      "source": "mock"
-    },
-    "id": "CAND-08",
-    "cluster_id": "CL-03",
-    "lat": 12.966721,
-    "lon": 75.769243,
+    "id": "CAND-04",
+    "cluster_id": "CL-01",
+    "lat": 12.90375,
+    "lon": 75.753749,
     "height": 30.0,
     "power": 43.0,
-    "added_pop": 584,
+    "added_pop": 113,
     "flags": {
       "road_km": 0.62,
-      "slope_deg": 0.3,
+      "slope_deg": 11.2,
       "backhaul": "Microwave LoS to Sakleshpur HQ"
     },
-    "why": "Captures 584 unserved residents in Anemahal cluster; local prominence +-1.3m over valley; gentle slope (0.3\u00b0) with direct road access (0.62 km)."
+    "why": "Captures 113 unserved residents in the Near Shukravarasanthe area; local elevation prominence +33 m over surrounding terrain; slope 11.2\u00b0 (< 15.0\u00b0), direct road access 0.62 km."
+  },
+  {
+    "id": "CAND-05",
+    "cluster_id": "CL-01",
+    "lat": 12.91625,
+    "lon": 75.746249,
+    "height": 30.0,
+    "power": 43.0,
+    "added_pop": 74,
+    "flags": {
+      "road_km": 0.169,
+      "slope_deg": 7.5,
+      "backhaul": "Fiber along road (169m)"
+    },
+    "why": "Captures 74 unserved residents in the Near Shukravarasanthe area; local elevation prominence +47 m over surrounding terrain; slope 7.5\u00b0 (< 15.0\u00b0), direct road access 0.169 km."
   }
 ]

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
 from pipeline.model.engine import compute_signal
+from pipeline.ranking.coverage import compute_coverage
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -153,6 +154,32 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+# Regional coordinate bounds derived dynamically from config.json (pilot bbox + terrain buffer margin)
+def _load_regional_bounds() -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    cfg_file = REPO_ROOT / "contracts" / "config.json"
+    min_lat, max_lat = 12.0, 14.0
+    min_lon, max_lon = 74.0, 77.0
+    if cfg_file.exists():
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            pilot = cdata.get("pilot", {})
+            bbox = pilot.get("bbox_wgs84", {})
+            buffer_km = float(pilot.get("terrain_buffer_km", 10.0))
+            # 1 deg lat ~ 111 km; 1 deg lon ~ 111 * cos(13 deg) ~ 108 km
+            margin_lat = buffer_km / 110.0
+            margin_lon = buffer_km / 105.0
+            min_lat = round(float(bbox.get("min_lat", 12.80)) - margin_lat, 4)
+            max_lat = round(float(bbox.get("max_lat", 13.10)) + margin_lat, 4)
+            min_lon = round(float(bbox.get("min_lon", 75.60)) - margin_lon, 4)
+            max_lon = round(float(bbox.get("max_lon", 75.95)) + margin_lon, 4)
+        except Exception:
+            pass
+    return (min_lat, max_lat), (min_lon, max_lon)
+
+LAT_BOUNDS, LON_BOUNDS = _load_regional_bounds()
+
+
 class CandidateTower(BaseModel):
     id: Optional[Union[int, str]] = None
     lat: float = Field(..., description="WGS84 latitude")
@@ -165,15 +192,15 @@ class CandidateTower(BaseModel):
     @field_validator("lat")
     @classmethod
     def validate_lat(cls, v: float) -> float:
-        if not (12.0 <= v <= 14.0):
-            raise ValueError(f"lat {v} is outside regional bounds [12.0, 14.0]")
+        if not (LAT_BOUNDS[0] <= v <= LAT_BOUNDS[1]):
+            raise ValueError(f"lat {v} is outside regional bounds [{LAT_BOUNDS[0]}, {LAT_BOUNDS[1]}]")
         return v
 
     @field_validator("lon")
     @classmethod
     def validate_lon(cls, v: float) -> float:
-        if not (74.0 <= v <= 77.0):
-            raise ValueError(f"lon {v} is outside regional bounds [74.0, 77.0]")
+        if not (LON_BOUNDS[0] <= v <= LON_BOUNDS[1]):
+            raise ValueError(f"lon {v} is outside regional bounds [{LON_BOUNDS[0]}, {LON_BOUNDS[1]}]")
         return v
 
     def get_height(self) -> float:
@@ -309,54 +336,20 @@ def recompute(payload: Union[RecomputePayload, List[CandidateTower]] = Body(...)
     else:
         raise HTTPException(status_code=422, detail="Invalid request body")
 
-    gap_cutoff = cfg.gap_threshold_dbm - cfg.uncertain_margin_db  # -106 dBm
-
-    # Empty candidate list case
-    if not candidates_list:
-        unserved_mask = baseline_dbm < gap_cutoff
-        total_unserved = int(np.sum(cell_pops[unserved_mask]))
-        return RecomputeResponse(changed=[], newly_covered_pop=0, total_unserved_pop=total_unserved)
-
-    # Convert candidate towers to format expected by compute_signal
-    tower_specs = [
-        {
-            "id": c.id,
-            "lat": c.lat,
-            "lon": c.lon,
-            "height": c.get_height(),
-            "power": c.get_power(),
-        }
-        for c in candidates_list
-    ]
-
-    # Shared propagation engine
-    cand_signal_arr, _ = compute_signal(STATE["cells_json"], tower_specs, dem, cfg)
-
-    # Clean signal array: out-of-range cells are NaN; replace with -inf for max comparison
-    cand_safe = np.where(np.isnan(cand_signal_arr), -np.inf, cand_signal_arr)
-
-    # IMMUTABLE BASELINE: np.maximum returns a newly allocated array, baseline_dbm is read-only
-    effective_dbm = np.maximum(baseline_dbm, cand_safe)
-
-    # Return only cells whose signal increased by > 0.1 dB
-    changed_mask = effective_dbm > (baseline_dbm + 0.1)
-    changed_cells = [
-        [int(cid), round(float(dbm), 1)]
-        for cid, dbm in zip(cell_ids[changed_mask], effective_dbm[changed_mask])
-    ]
-
-    # Newly covered population: baseline gap cells (< threshold - margin) that became >= cutoff
-    was_gap = baseline_dbm < gap_cutoff
-    now_covered = effective_dbm >= gap_cutoff
-    newly_covered_mask = was_gap & now_covered
-    newly_covered_pop = int(np.sum(cell_pops[newly_covered_mask]))
-
-    # Remaining unserved population
-    still_unserved_mask = effective_dbm < gap_cutoff
-    total_unserved_pop = int(np.sum(cell_pops[still_unserved_mask]))
+    # Delegate to shared coverage computation function (pipeline.ranking.coverage)
+    cov = compute_coverage(
+        candidates_list,
+        dem=dem,
+        cfg=cfg,
+        cells_json=STATE["cells_json"],
+        baseline_dbm=baseline_dbm,
+        baseline_states=STATE["baseline_states"],
+        cell_pops=cell_pops,
+        cell_ids=cell_ids,
+    )
 
     return RecomputeResponse(
-        changed=changed_cells,
-        newly_covered_pop=newly_covered_pop,
-        total_unserved_pop=total_unserved_pop,
+        changed=cov.changed,
+        newly_covered_pop=cov.newly_covered_pop,
+        total_unserved_pop=cov.total_unserved_pop,
     )

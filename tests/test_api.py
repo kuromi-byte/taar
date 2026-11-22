@@ -87,8 +87,8 @@ def test_empty_towers_list_returns_empty_changed(client):
 
     assert data["changed"] == [], "Empty towers list must yield empty changed list"
     assert data["newly_covered_pop"] == 0, "Empty towers list must yield 0 newly covered pop"
-    assert data["total_unserved_pop"] > 0, "Total unserved population must reflect baseline"
-    print(f"[Check 3 PASSED] empty towers -> changed=[], newly_covered=0, total_unserved={data['total_unserved_pop']:,}")
+    assert data["total_unserved_pop"] == 68339, f"Total unserved must match baseline gap pop (68,339), got {data['total_unserved_pop']}"
+    print(f"[Check 3 PASSED] empty towers -> changed=[], newly_covered=0, total_unserved={data['total_unserved_pop']:,} (state 'gap' cells only, excluding unknown)")
 
 
 def test_bad_input_returns_400_or_422(client):
