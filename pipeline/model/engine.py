@@ -9,11 +9,33 @@ import numpy as np
 from pyproj import Transformer
 from .config import PropagationConfig
 from .dem import DEMGrid
-from .hata import cost231_hata
+from .hata import compute_path_loss
 from .shadow import PolarSweepEngine
 
 # Fast cached transformer WGS84 -> UTM Zone 43N
 _TRANSFORMER_4326_TO_32643 = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
+
+
+class SignalArray(np.ndarray):
+    """NumPy float32 array subclass for RF signal dBm values.
+
+    Preserves NaN for unserved/out-of-range cells, while safely treating NaN as -inf
+    when evaluated with np.maximum against baseline cell signal in the API.
+    """
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if ufunc is np.maximum:
+            cleaned = [
+                np.where(np.isnan(np.asarray(x)), -np.inf, np.asarray(x))
+                if isinstance(x, (np.ndarray, list)) else x
+                for x in inputs
+            ]
+            res = getattr(ufunc, method)(*cleaned, **kwargs)
+            return np.asarray(res).view(SignalArray)
+        casted = [np.asarray(x) if isinstance(x, SignalArray) else x for x in inputs]
+        res = getattr(ufunc, method)(*casted, **kwargs)
+        if isinstance(res, np.ndarray):
+            return res.view(SignalArray)
+        return res
 
 
 def parse_cells_coords(cells: Any) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray], int]:
@@ -182,13 +204,12 @@ def compute_signal(
             tw_x, tw_y, sweep_angles, z_antenna, sub_x, sub_y, sub_elev, cfg.receiver_height_m
         )
 
-        # Calculate COST-231 Hata path loss
-        path_loss = cost231_hata(
+        # Dispatch to correct path-loss model by frequency
+        path_loss = compute_path_loss(
             distance_m=sub_dist,
             freq_mhz=cfg.freq_mhz,
             hb=tw_h,
             hm=cfg.receiver_height_m,
-            cm=0.0,
             min_dist_m=cfg.min_distance_m,
         )
 
@@ -201,25 +222,25 @@ def compute_signal(
         # Update best server power (maximum across towers)
         best_signal[in_range_mask] = np.maximum(best_signal[in_range_mask], p_rx)
 
-    # Floor for unreachable cells (-140.0 dBm baseline floor)
-    best_signal[best_signal == -np.inf] = -140.0
+    # Floor for unreachable cells: set to NaN (no serving tower in range)
+    best_signal[best_signal == -np.inf] = np.nan
 
     min_dist_km = (min_dist_m / 1000.0).astype(np.float32)
-    return best_signal, min_dist_km
+    return best_signal.view(SignalArray), min_dist_km
 
 
 def classify_state(
     signal_dbm: Union[float, np.ndarray],
-    dist_to_nearest_tower_km: Union[float, np.ndarray],
+    dist_or_evidence: Union[float, np.ndarray, bool] = None,
     cfg: Optional[PropagationConfig] = None,
 ) -> Union[str, np.ndarray]:
     """Classify cell coverage state based on modeled signal, uncertain band, and unknown rule.
 
-    States:
-      - 'Unknown': no tower evidence nearby (dist_to_nearest_tower_km > unknown_radius_km)
-      - 'Likely covered': signal >= gap_threshold_dbm + uncertain_margin_db
-      - 'Likely gap': signal < gap_threshold_dbm - uncertain_margin_db
-      - 'Uncertain': within [gap_threshold - margin, gap_threshold + margin)
+    States (lowercase, per contract):
+      - 'unknown': no tower evidence (evidence False, dist > unknown_radius_km, or NaN signal)
+      - 'covered': signal >= gap_threshold_dbm + uncertain_margin_db
+      - 'gap': signal < gap_threshold_dbm - uncertain_margin_db
+      - 'uncertain': within [gap_threshold - margin, gap_threshold + margin)
 
     Returns:
         Array of strings (or single string if input was scalar).
@@ -228,23 +249,29 @@ def classify_state(
         cfg = PropagationConfig()
 
     sig = np.atleast_1d(signal_dbm)
-    dist = np.atleast_1d(dist_to_nearest_tower_km)
 
     lower_bound = cfg.gap_threshold_dbm - cfg.uncertain_margin_db
     upper_bound = cfg.gap_threshold_dbm + cfg.uncertain_margin_db
 
-    # Default state is Uncertain
-    states = np.full(sig.shape, "Uncertain", dtype=object)
+    # Default state is uncertain
+    states = np.full(sig.shape, "uncertain", dtype=object)
 
-    # Likely covered
-    states[sig >= upper_bound] = "Likely covered"
+    # covered
+    states[sig >= upper_bound] = "covered"
 
-    # Likely gap
-    states[sig < lower_bound] = "Likely gap"
+    # gap
+    states[sig < lower_bound] = "gap"
 
-    # Unknown: beyond tower evidence threshold
-    states[dist > cfg.unknown_radius_km] = "Unknown"
+    # unknown: no tower evidence (boolean False), distance beyond threshold, or NaN signal
+    if dist_or_evidence is not None:
+        doe = np.atleast_1d(dist_or_evidence)
+        if doe.dtype == bool or isinstance(dist_or_evidence, (bool, np.bool_)):
+            states[~doe] = "unknown"
+        else:
+            states[(doe > cfg.unknown_radius_km) | np.isinf(doe)] = "unknown"
 
-    if isinstance(signal_dbm, (int, float)) and isinstance(dist_to_nearest_tower_km, (int, float)):
+    states[np.isnan(sig)] = "unknown"
+
+    if isinstance(signal_dbm, (int, float)) and (dist_or_evidence is None or isinstance(dist_or_evidence, (int, float, bool))):
         return str(states[0])
     return states

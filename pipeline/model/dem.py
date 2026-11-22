@@ -118,7 +118,10 @@ class DEMGrid:
 
         elev = self.data[safe_rows, safe_cols].copy()
         elev[~valid] = default_val
-        elev[elev == self.nodata] = default_val
+        is_nodata = (elev == self.nodata) | np.isnan(elev)
+        if np.any(is_nodata):
+            valid_pts = self.data[(self.data != self.nodata) & (~np.isnan(self.data))]
+            elev[is_nodata] = float(np.median(valid_pts)) if len(valid_pts) > 0 else default_val
 
         return elev if isinstance(x, np.ndarray) else elev[0]
 
@@ -133,5 +136,5 @@ class DEMGrid:
 
         elev = self.data[safe_rows, safe_cols].copy()
         elev[~valid] = default_val
-        elev[elev == self.nodata] = default_val
+        elev[np.isnan(elev)] = self.nodata
         return elev

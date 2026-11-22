@@ -110,20 +110,18 @@ def process_cells(cells_base_path: Path = None, towers_path: Path = None):
 
         states = np.full(len(signals), "uncertain", dtype=object)
         states[signals >= upper_bound] = "covered"
-        states[signals < lower_bound] = "gap"
+        states[(signals < lower_bound) | np.isnan(signals)] = "gap"
         states[~tower_ev_flags] = "unknown"
     else:
         states = classify_state(signals, min_dists_km, cfg)
-        # Normalize to lowercase contract values
-        state_map = {"Likely covered": "covered", "Likely gap": "gap", "Uncertain": "uncertain", "Unknown": "unknown"}
-        states = np.array([state_map.get(s, str(s).lower()) for s in states], dtype=object)
+        states = np.array([str(s).lower() for s in states], dtype=object)
 
     # Build output GeoJSON with "meta": {"source": "worldpop"}
     out_features = []
     for i, feat in enumerate(features):
         props = dict(feat.get("properties", {}))
         props["id"] = feat["id"]
-        props["baseline_dbm"] = round(float(signals[i]), 1) if signals[i] > -139.0 else None
+        props["baseline_dbm"] = round(float(signals[i]), 1) if np.isfinite(signals[i]) and signals[i] > -139.0 else None
         props["state"] = str(states[i])
 
         out_features.append({

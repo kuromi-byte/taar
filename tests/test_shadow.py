@@ -48,7 +48,7 @@ def test_synthetic_ridge_shadowing():
 
     cfg = PropagationConfig(
         freq_mhz=1800.0,
-        shadow_penalty_db=18.0,
+        shadow_penalty_db=15.0,
         max_radius_km=10.0,
     )
     engine = PolarSweepEngine(cfg)
@@ -73,8 +73,8 @@ def test_synthetic_ridge_shadowing():
 
     # Cell 1 (behind ridge at 2000m) vs Cell 2 (clear at 2000m):
     # Both are at 2000m, so path loss is identical.
-    # The only difference is the 18 dB shadow penalty!
+    # The only difference is the 15 dB shadow penalty!
     signal_diff = signals[2] - signals[1]
     assert np.isclose(signal_diff, cfg.shadow_penalty_db, atol=0.5), (
-        f"Expected ~18 dB difference between clear and shadowed cells at 2000m, got {signal_diff:.2f} dB"
+        f"Expected ~15 dB difference between clear and shadowed cells at 2000m, got {signal_diff:.2f} dB"
     )

@@ -63,11 +63,14 @@ class PolarSweepEngine:
 
         # Sample DEM at native resolution along all rays: shape (720, num_steps)
         z_samples = dem.sample_grid(sample_x, sample_y, default_val=z_tower_ground)
+        nodata_mask = (z_samples == dem.nodata) | np.isnan(z_samples)
 
         # Elevation angle from antenna to each ground point: (z_ground - z_antenna) / d
         angles = (z_samples - z_antenna) / self.distances[None, :]
+        # Nodata samples must not block rays (treated as no obstruction): set angle to -inf
+        angles[nodata_mask] = -np.inf
 
-        # Vectorized running maximum along each ray
+        # Vectorized running maximum along each ray (nodata with -inf never raises horizon)
         running_max_angle = np.maximum.accumulate(angles, axis=1)
 
         return running_max_angle, z_antenna
@@ -121,7 +124,7 @@ class PolarSweepEngine:
         obstruction_angle = running_max_angle[ray_idx, step_idx]
 
         # Cell is shadowed if its receiver angle is below the horizon obstruction
-        # Small tolerance (1e-5) prevents numerical noise on flat ground
-        is_shadowed = (cell_los_angle < obstruction_angle - 1e-5) & (dist <= self.max_radius_m)
+        # Small tolerance (1e-5) prevents numerical noise on flat ground; distance 0 is never shadowed
+        is_shadowed = (cell_los_angle < obstruction_angle - 1e-5) & (dist <= self.max_radius_m) & (dist > 0.0)
 
         return is_shadowed, dist
