@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Header } from './components/Header';
 import { CounterPanel } from './components/CounterPanel';
 import { ShortlistTable } from './components/ShortlistTable';
@@ -6,10 +6,18 @@ import { CoverageMap } from './components/Map';
 import { BriefModal } from './components/BriefModal';
 import { LimitationsModal } from './components/LimitationsModal';
 import { DATA_CONFIG } from './config/data';
-import { Candidate, Cluster, RecomputeRequest, RecomputeResponse } from './types/contracts';
+import { Candidate, Cluster, RecomputeRequest } from './types/contracts';
+import { RequestSequenceGuard } from './utils/requestSequence';
+import { isMockSource } from './utils/styleExpressions';
+import { validateRecomputeResponse } from './utils/validateRecompute';
+import { RecomputeStateMachine, RecomputeStatus } from './utils/recomputeStatus';
 
 export const App: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const candidatesRef = useRef<Candidate[]>([]);
+  candidatesRef.current = candidates;
+
+  const lastSuccessfulCandidatesRef = useRef<Candidate[]>([]);
   const [initialCandidates, setInitialCandidates] = useState<Candidate[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | number | null>(null);
@@ -21,74 +29,76 @@ export const App: React.FC = () => {
   const [newlyCoveredPop, setNewlyCoveredPop] = useState<number>(0);
   const [changedCells, setChangedCells] = useState<[number, number][]>([]);
   const [showModeled, setShowModeled] = useState<boolean>(true);
-  const [isRecomputing, setIsRecomputing] = useState<boolean>(false);
   const [apiConnected, setApiConnected] = useState<boolean>(false);
-  const [apiError, setApiError] = useState<string | null>(null);
   const [isMockData, setIsMockData] = useState<boolean>(false);
+
+  // Status & Error state machine
+  const [recomputeStatus, setRecomputeStatus] = useState<RecomputeStatus>('idle');
+  const [recomputeError, setRecomputeError] = useState<string | null>(null);
+  const [cellsError, setCellsError] = useState<string | null>(null);
+  const [shortlistLoading, setShortlistLoading] = useState<boolean>(true);
+  const [shortlistError, setShortlistError] = useState<string | null>(null);
 
   // Modals
   const [activeBriefCluster, setActiveBriefCluster] = useState<Cluster | null>(null);
   const [showLimitationsModal, setShowLimitationsModal] = useState<boolean>(false);
 
-  // 1. Initial Data Fetch
-  useEffect(() => {
-    // Check API health
-    fetch(`${DATA_CONFIG.apiUrl}/health`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === 'ok') setApiConnected(true);
-      })
-      .catch(() => setApiConnected(false));
+  // Request sequence counter & AbortController ref
+  const requestSeqRef = useRef<RequestSequenceGuard>(new RequestSequenceGuard());
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const recomputeStateMachineRef = useRef<RecomputeStateMachine>(new RecomputeStateMachine());
 
-    // Audit cells.geojson for meta.source == "mock"
+  // Subscribe to recompute state machine
+  useEffect(() => {
+    return recomputeStateMachineRef.current.subscribe((status) => {
+      setRecomputeStatus(status);
+    });
+  }, []);
+
+  // 1. Load Cells GeoJSON (with full-panel error fallback)
+  const loadCells = useCallback(() => {
+    setCellsError(null);
     fetch(DATA_CONFIG.paths.cells)
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
-        if (data && (data.meta?.source === 'mock' || data.source === 'mock')) {
+        if (!data || !Array.isArray(data.features)) {
+          throw new Error('Invalid GeoJSON');
+        }
+        if (isMockSource(data.meta?.source) || isMockSource(data.source)) {
           setIsMockData(true);
         }
       })
-      .catch((err) => console.warn('Could not inspect cells metadata:', err));
-
-    // Fetch Candidates
-    fetch(DATA_CONFIG.paths.candidates)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: Candidate[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          // Normalize height_m and power_dbm defaults if missing
-          const normalized = data.map((c) => ({
-            ...c,
-            height_m: (c as any).height_m ?? 30.0,
-            power_dbm: (c as any).power_dbm ?? 43.0,
-          }));
-          setCandidates(normalized);
-          setInitialCandidates(JSON.parse(JSON.stringify(normalized)));
-          const sumAdded = normalized.reduce((acc, c) => acc + (c.added_pop || 0), 0);
-          setNewlyCoveredPop(sumAdded);
-          setSelectedCandidateId(normalized[0].id);
-        }
-      })
-      .catch((err) => console.error('Failed to load candidates:', err));
-
-    // Fetch Clusters
-    fetch(DATA_CONFIG.paths.clusters)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: Cluster[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setClusters(data);
-          const sumUnserved = data.reduce((acc, cl) => acc + (cl.pop_in_gap || 0), 0);
-          if (sumUnserved > 0) setTotalUnservedPop(sumUnserved);
-        }
-      })
-      .catch((err) => console.error('Failed to load clusters:', err));
+      .catch(() => {
+        setCellsError('Could not load cell grid data. Please verify data files and retry.');
+      });
   }, []);
 
   // 2. Perform Recompute against FastAPI Backend using EXACT contract shape
   const runRecompute = useCallback(async (currentCandidates: Candidate[]) => {
-    setIsRecomputing(true);
-    setApiError(null);
+    // Abort in-flight recompute request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-    // Contract: {"towers":[{"lat": number, "lon": number, "height_m": number, "power_dbm": number}]}
+    const seq = requestSeqRef.current.next();
+    setRecomputeError(null);
+
+    const slowMs = DATA_CONFIG.getSlowMs();
+    const timeoutMs = DATA_CONFIG.getTimeoutMs();
+
+    recomputeStateMachineRef.current.start(seq, {
+      slowMs,
+      timeoutMs,
+      onTimeout: () => {
+        controller.abort('timeout');
+      },
+    });
+
     const requestPayload: RecomputeRequest = {
       towers: currentCandidates.map((c) => ({
         lat: c.lat,
@@ -103,96 +113,171 @@ export const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`Recompute HTTP ${response.status}: ${response.statusText}`);
+        if (!requestSeqRef.current.isLatest(seq)) return;
+        setRecomputeError(`The server returned an error (HTTP ${response.status})`);
+        recomputeStateMachineRef.current.error(seq);
+        return;
       }
 
-      const resData: RecomputeResponse = await response.json();
-      setApiConnected(true);
+      let resJson: unknown;
+      try {
+        resJson = await response.json();
+      } catch {
+        if (!requestSeqRef.current.isLatest(seq)) return;
+        setRecomputeError('The server sent an unexpected response');
+        recomputeStateMachineRef.current.error(seq);
+        return;
+      }
 
-      // Contract response: {"changed": [[cell_id, dbm], ...], "newly_covered_pop": N, "total_unserved_pop": M}
-      setChangedCells(resData.changed);
-      setNewlyCoveredPop(resData.newly_covered_pop);
-      setTotalUnservedPop(resData.total_unserved_pop);
+      const validation = validateRecomputeResponse(resJson);
+      if (!validation.ok) {
+        if (!requestSeqRef.current.isLatest(seq)) return;
+        setRecomputeError('The server sent an unexpected response');
+        recomputeStateMachineRef.current.error(seq);
+        return;
+      }
+
+      // Guard against out-of-order stale responses
+      if (!requestSeqRef.current.isLatest(seq)) {
+        return;
+      }
+
+      setApiConnected(true);
+      setRecomputeError(null);
+      lastSuccessfulCandidatesRef.current = JSON.parse(JSON.stringify(currentCandidates));
+
+      const data = validation.data;
+      setChangedCells(data.changed);
+      setNewlyCoveredPop(data.newly_covered_pop);
+      setTotalUnservedPop(data.total_unserved_pop);
       setShowModeled(true);
+
+      recomputeStateMachineRef.current.success(seq, data.changed.length);
     } catch (err: any) {
-      // Contract rule: "If the API call fails, show a clear error and keep the previous map state."
-      console.warn('API recompute failed; preserving previous map state:', err);
-      setApiConnected(false);
-      setApiError(`Recompute failed: ${err.message || 'API endpoint unavailable'}. Preserving previous map state.`);
-    } finally {
-      setIsRecomputing(false);
+      if (!requestSeqRef.current.isLatest(seq)) {
+        return;
+      }
+
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        if (controller.signal.reason === 'timeout' || recomputeStateMachineRef.current.getStatus() === 'error') {
+          setRecomputeError('The server took too long to respond');
+          recomputeStateMachineRef.current.error(seq);
+        }
+        return;
+      }
+
+      setRecomputeError("Can't reach the server");
+      recomputeStateMachineRef.current.error(seq);
     }
   }, []);
 
-  // Initial recompute once candidates land
-  useEffect(() => {
-    if (initialCandidates.length > 0) {
-      runRecompute(initialCandidates);
-    }
-  }, [initialCandidates, runRecompute]);
+  // 3. Load Candidates & Clusters (with loading skeleton and retry)
+  const loadCandidatesAndClusters = useCallback(() => {
+    setShortlistLoading(true);
+    setShortlistError(null);
 
-  // 3. Candidate Drag Handler (Fires strictly on marker DROP)
+    Promise.all([
+      fetch(DATA_CONFIG.paths.candidates).then((r) => {
+        if (!r.ok) throw new Error(`Candidates HTTP ${r.status}`);
+        return r.json();
+      }),
+      fetch(DATA_CONFIG.paths.clusters).then((r) => {
+        if (!r.ok) throw new Error(`Clusters HTTP ${r.status}`);
+        return r.json();
+      }),
+    ])
+      .then(([cands, cls]) => {
+        if (!Array.isArray(cands) || !Array.isArray(cls)) {
+          throw new Error('Invalid candidates or clusters format');
+        }
+        const normalized = cands.map((c: any) => ({
+          ...c,
+          height_m: c.height_m ?? 30.0,
+          power_dbm: c.power_dbm ?? 43.0,
+        }));
+        setCandidates(normalized);
+        candidatesRef.current = normalized;
+        setInitialCandidates(JSON.parse(JSON.stringify(normalized)));
+        lastSuccessfulCandidatesRef.current = JSON.parse(JSON.stringify(normalized));
+        setClusters(cls);
+        setSelectedCandidateId(normalized[0]?.id || null);
+        setShortlistLoading(false);
+
+        // Initial recompute once candidates land
+        runRecompute(normalized);
+      })
+      .catch(() => {
+        setShortlistLoading(false);
+        setShortlistError('Could not load candidate sites. Please retry.');
+      });
+  }, [runRecompute]);
+
+  // Initial Fetch on Mount
+  useEffect(() => {
+    loadCells();
+    loadCandidatesAndClusters();
+  }, [loadCells, loadCandidatesAndClusters]);
+
+  // 4. Candidate Drag Handler (Fires strictly on marker DROP)
   const handleCandidateMove = useCallback(
     (id: string | number, newLat: number, newLon: number) => {
-      setCandidates((prev) => {
-        const updated = prev.map((c) => {
-          if (c.id === id) {
-            return {
-              ...c,
-              lat: Number(newLat.toFixed(6)),
-              lon: Number(newLon.toFixed(6)),
-            };
-          }
-          return c;
-        });
-
-        // Trigger live recompute on drop
-        runRecompute(updated);
-        return updated;
+      const updatedList = candidatesRef.current.map((c) => {
+        if (c.id === id) {
+          return {
+            ...c,
+            lat: Number(newLat.toFixed(6)),
+            lon: Number(newLon.toFixed(6)),
+          };
+        }
+        return c;
       });
+      candidatesRef.current = updatedList;
+      setCandidates(updatedList);
+
+      // Trigger live recompute on drop
+      runRecompute(updatedList);
     },
     [runRecompute]
   );
 
-  // 4. Update Candidate Parameters (height_m, power_dbm)
+  // 5. Update Candidate Parameters (height_m, power_dbm)
   const handleCandidateParamChange = useCallback(
     (id: string | number, field: 'height_m' | 'power_dbm', value: number) => {
-      setCandidates((prev) => {
-        const updated = prev.map((c) => {
-          if (c.id === id) {
-            return {
-              ...c,
-              [field]: value,
-            };
-          }
-          return c;
-        });
-        runRecompute(updated);
-        return updated;
+      const updatedList = candidatesRef.current.map((c) => {
+        if (c.id === id) {
+          return {
+            ...c,
+            [field]: Number(value),
+          };
+        }
+        return c;
       });
+      candidatesRef.current = updatedList;
+      setCandidates(updatedList);
+      runRecompute(updatedList);
     },
     [runRecompute]
   );
 
-  // 5. Delete Candidate
+  // 6. Delete Candidate
   const handleDeleteCandidate = useCallback(
     (id: string | number) => {
-      setCandidates((prev) => {
-        const updated = prev.filter((c) => c.id !== id);
-        if (selectedCandidateId === id) {
-          setSelectedCandidateId(updated.length > 0 ? updated[0].id : null);
-        }
-        runRecompute(updated);
-        return updated;
-      });
+      const updatedList = candidatesRef.current.filter((c) => c.id !== id);
+      candidatesRef.current = updatedList;
+      setCandidates(updatedList);
+      if (selectedCandidateId === id) {
+        setSelectedCandidateId(updatedList[0]?.id || null);
+      }
+      runRecompute(updatedList);
     },
     [selectedCandidateId, runRecompute]
   );
 
-  // 6. Add Candidate
+  // 7. Add Candidate
   const handleAddCandidate = useCallback(() => {
     const newId = `cand-custom-${Date.now().toString().slice(-4)}`;
     const newCand: Candidate = {
@@ -211,30 +296,46 @@ export const App: React.FC = () => {
       power_dbm: 43.0,
     } as any;
 
-    setCandidates((prev) => {
-      const updated = [...prev, newCand];
-      setSelectedCandidateId(newId);
-      setFlyToTarget({ lat: newCand.lat, lon: newCand.lon });
-      runRecompute(updated);
-      return updated;
-    });
+    const updated = [...candidatesRef.current, newCand];
+    candidatesRef.current = updated;
+    setCandidates(updated);
+    setSelectedCandidateId(newId);
+    setFlyToTarget({ lat: newCand.lat, lon: newCand.lon });
+    runRecompute(updated);
   }, [selectedClusterId, runRecompute]);
 
-  // 7. Reset Candidates to Initial
+  // 8. Reset Candidates to Initial
   const handleResetCandidates = useCallback(() => {
     const copy = JSON.parse(JSON.stringify(initialCandidates));
+    candidatesRef.current = copy;
     setCandidates(copy);
+    setRecomputeError(null);
     runRecompute(copy);
   }, [initialCandidates, runRecompute]);
 
-  // 8. Select Candidate
+  // 9. Retry Recompute Handler
+  const handleRetryRecompute = useCallback(() => {
+    runRecompute(candidatesRef.current);
+  }, [runRecompute]);
+
+  // 10. Revert Marker Handler
+  const handleRevertMarker = useCallback(() => {
+    const reverted = JSON.parse(JSON.stringify(lastSuccessfulCandidatesRef.current));
+    candidatesRef.current = reverted;
+    setCandidates(reverted);
+    setRecomputeError(null);
+    recomputeStateMachineRef.current.success(requestSeqRef.current.next(), 1);
+    setRecomputeStatus('success');
+  }, []);
+
+  // 11. Select Candidate
   const handleSelectCandidate = useCallback((candidate: Candidate) => {
     setSelectedCandidateId(candidate.id);
     setSelectedClusterId(candidate.cluster_id);
     setFlyToTarget({ lat: candidate.lat, lon: candidate.lon });
   }, []);
 
-  // 9. Select Cluster
+  // 12. Select Cluster
   const handleSelectCluster = useCallback(
     (cluster: Cluster) => {
       setSelectedClusterId(cluster.id);
@@ -247,6 +348,24 @@ export const App: React.FC = () => {
     [candidates]
   );
 
+  // Expose dev helpers for automated tests
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as any).__appState = {
+      candidates,
+      newlyCoveredPop,
+      totalUnservedPop,
+      recomputeStatus,
+      recomputeError,
+      isRecomputing: recomputeStatus === 'loading' || recomputeStatus === 'slow',
+      apiConnected,
+      handleCandidateMove,
+      handleRetryRecompute,
+      handleRevertMarker,
+      loadCells,
+      loadCandidatesAndClusters,
+    };
+  }
+
   const selectedCandidate = candidates.find((c) => c.id === selectedCandidateId);
 
   return (
@@ -257,17 +376,26 @@ export const App: React.FC = () => {
         isMockData={isMockData}
       />
 
-      {apiError && (
-        <div className="api-error-banner" role="alert">
-          <span>⚠️ {apiError}</span>
-          <button className="error-close-btn" onClick={() => setApiError(null)}>
-            &times;
-          </button>
+      {/* Error banner with role="alert", Retry and Revert marker buttons */}
+      {recomputeError && (
+        <div className="recompute-error-banner" role="alert">
+          <div className="error-banner-content">
+            <span className="error-icon">⚠️</span>
+            <span className="error-message">{recomputeError}</span>
+          </div>
+          <div className="error-banner-actions">
+            <button className="btn-error-retry" onClick={handleRetryRecompute}>
+              Retry
+            </button>
+            <button className="btn-error-revert" onClick={handleRevertMarker}>
+              Revert marker
+            </button>
+          </div>
         </div>
       )}
 
       <div className="main-content-split">
-        {/* Left Side: Interactive Map */}
+        {/* Left Side: Interactive Map & Counter Panel */}
         <div className="map-panel-wrapper">
           <CounterPanel
             totalUnservedPop={totalUnservedPop}
@@ -276,7 +404,8 @@ export const App: React.FC = () => {
             showModeled={showModeled}
             onToggleBeforeAfter={() => setShowModeled((prev) => !prev)}
             onResetCandidates={handleResetCandidates}
-            isRecomputing={isRecomputing}
+            recomputeStatus={recomputeStatus}
+            recomputeError={recomputeError}
             onManualRecompute={() => runRecompute(candidates)}
           />
 
@@ -291,12 +420,13 @@ export const App: React.FC = () => {
             changedCells={changedCells}
             showModeled={showModeled}
             flyToTarget={flyToTarget}
+            cellsError={cellsError}
+            onRetryCells={loadCells}
           />
         </div>
 
         {/* Right Side: Shortlist Table & Gap Clusters */}
         <aside className="sidebar-shortlist">
-          {/* Candidate parameter editor card */}
           {selectedCandidate && (
             <div className="candidate-inspector-card">
               <div className="inspector-header">
@@ -305,9 +435,9 @@ export const App: React.FC = () => {
                   <strong>{selectedCandidate.id}</strong>
                 </div>
                 <button
-                  className="btn-delete-cand"
+                  className="btn-danger-sm"
                   onClick={() => handleDeleteCandidate(selectedCandidate.id)}
-                  title="Remove candidate site"
+                  title="Remove this candidate tower"
                 >
                   Delete Site
                 </button>
@@ -363,18 +493,22 @@ export const App: React.FC = () => {
             onSelectCandidate={handleSelectCandidate}
             onSelectCluster={handleSelectCluster}
             onGenerateBrief={(cluster) => setActiveBriefCluster(cluster)}
+            isLoading={shortlistLoading}
+            error={shortlistError}
+            onRetry={loadCandidatesAndClusters}
           />
         </aside>
       </div>
 
-      {/* Brief Modal */}
-      <BriefModal
-        cluster={activeBriefCluster}
-        candidates={candidates}
-        onClose={() => setActiveBriefCluster(null)}
-      />
+      {/* Modals */}
+      {activeBriefCluster && (
+        <BriefModal
+          cluster={activeBriefCluster}
+          candidates={candidates}
+          onClose={() => setActiveBriefCluster(null)}
+        />
+      )}
 
-      {/* Limitations & Methodology Modal */}
       <LimitationsModal
         isOpen={showLimitationsModal}
         onClose={() => setShowLimitationsModal(false)}

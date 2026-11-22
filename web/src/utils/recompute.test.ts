@@ -150,4 +150,28 @@ describe('applyRecompute pure function', () => {
     // 900 setFeatureState calls in JS must execute in well under 10ms
     expect(elapsed).toBeLessThan(50);
   });
+
+  it('correctly handles 1-based indexing for real full dataset (ids 1..11394)', () => {
+    const map = createMockMap();
+    const prevSet = new Set<number>();
+    const changed1Based: [number, number][] = [
+      [1, -85.0],
+      [500, -90.0],
+      [11394, -72.5],
+    ];
+
+    const result = applyRecompute(map, prevSet, changed1Based, 'cells');
+
+    expect(result.size).toBe(3);
+    expect(result.has(1)).toBe(true);
+    expect(result.has(500)).toBe(true);
+    expect(result.has(11394)).toBe(true);
+    expect(result.has(0)).toBe(false);
+
+    expect(map.setCalls).toEqual([
+      { target: { source: 'cells', id: 1 }, state: { dbm: -85.0 } },
+      { target: { source: 'cells', id: 500 }, state: { dbm: -90.0 } },
+      { target: { source: 'cells', id: 11394 }, state: { dbm: -72.5 } },
+    ]);
+  });
 });

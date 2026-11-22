@@ -13,7 +13,7 @@ export interface CellProperties {
 
 export interface CellFeature {
   type: 'Feature';
-  id: number; // Integer ID 0..N
+  id: number; // Integer ID (supports 1..N or 0..N)
   geometry: {
     type: 'Polygon';
     coordinates: number[][][];
