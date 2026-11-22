@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """FastAPI application for Rural Coverage Gap Mapper.
 
 Dev B – /api (api/main.py)
@@ -17,7 +19,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from fastapi import FastAPI, Body, HTTPException, Request, status
