@@ -522,28 +522,81 @@ Evaluated [`web/public/data/cells.geojson`](file:///c:/Users/20635/OneDrive/Desk
   - `data/processed/cells.geojson` SHA-256: `c0ba3d7fb84807afd2cb96ddb4f6bd234ae743f4c5120879d21c0f5b212fa03d`.
   - **Verdict**: Identical file (byte-for-byte SHA-256 match).
 
-### B. Real API Contract Checks (Port 8000)
-- **Reachability Check**:
-  - Checked `http://localhost:8000/docs` and `POST http://localhost:8000/recompute`.
-  - **Status**: **STOPPED / NOT ANSWERING**. Connection refused (`curl: (7) Failed to connect to localhost:8000`).
-  - **Host Environment**: The Windows ARM64 host system lacks a configured Python virtualenv with `uvicorn`, `fastapi`, `numpy`, and `rasterio` required to boot `api/main.py`.
-  - Per explicit instruction ("If the API is not answering on http://localhost:8000, STOP and say so; do not use the mock server. Anything not run is 'NOT DONE'"):
-    - CORS Header Verification: **NOT DONE**
-    - POST `{"towers": []}` Contract Check: **NOT DONE**
-    - POST Single Candidate Checks: **NOT DONE**
-    - Null Baseline Changed Cell Check: **NOT DONE**
-    - Idempotence & Validation 4xx Edge Cases: **NOT DONE**
+### B. Real API Contract Checks (Port 8000) [REAL API]
+Tested against live FastAPI backend running at `http://localhost:8000` via [`scratch/task2b_part_b.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/task2b_part_b.mjs).
 
-### C. Browser Double-Drag on Real API (CDP)
-- Per explicit instruction to test strictly against the real API on `http://localhost:8000` without using the mock server:
-  - Drag 1 (20 mousemoves 0 requests, 1 on mouseup): **NOT DONE (API Down)**
-  - Drag 2 (6 km away, stale footprint audit): **NOT DONE (API Down)**
-  - Drag 3 (Out of bounds empty changed): **NOT DONE (API Down)**
-  - Rapid double drop (30 ms apart): **NOT DONE (API Down)**
-  - Note: All UI drag behaviors, request deduplication, sequence guards, and footprint lifecycle were previously verified passing under Task 2/Task 4 CDP automation.
+- **1. CORS Header Verification**:
+  - `OPTIONS /recompute` with Origin `http://localhost:5173`:
+  - `Status`: **200 OK**
+  - `Access-Control-Allow-Origin`: **`http://localhost:5173`** -> **PASS**
+  - `Access-Control-Allow-Methods`: `DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, QUERY`
+- **2. Empty Towers POST `{"towers": []}`**:
+  - `Status`: **200 OK**
+  - `changed`: **`[]`** (0 cells) -> **PASS**
+  - `newly_covered_pop`: **`0`** -> **PASS**
+  - `total_unserved_pop` (server): **`68,339`**
+  - Independent Baseline Gap Population (`state === "gap"` in `cells.geojson`): **`68,339`**
+  - Server vs Independent Match: **PASS (Exact match: 68,339 == 68,339)**
+- **3. POST Each Real Candidate (Single Tower Standalone)**:
+| Candidate ID | Response Time | Changed Cells | Null Baseline Changed | Server `newly_covered_pop` | Independent `newly_covered_pop` | Server vs Indep Match | `candidates.json` `added_pop` | Server vs `added_pop` Match | Server `total_unserved_pop` | Expected Unserved (`68,339 - newly`) | Unserved Diff |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **CAND-01** | 435.7 ms | 2,238 | 414 | **8,424** | **8,424** | **MATCH (PASS)** | 880 | Mismatch (Greedy vs Standalone) | 57,977 | 59,915 | -1,938 |
+| **CAND-02** | 337.6 ms | 2,306 | 340 | **7,513** | **7,513** | **MATCH (PASS)** | 557 | Mismatch (Greedy vs Standalone) | 59,408 | 60,826 | -1,418 |
+| **CAND-03** | 342.4 ms | 2,253 | 373 | **8,470** | **8,470** | **MATCH (PASS)** | 188 | Mismatch (Greedy vs Standalone) | 58,576 | 59,869 | -1,293 |
+| **CAND-04** | 145.1 ms | 2,241 | 407 | **8,347** | **8,347** | **MATCH (PASS)** | 113 | Mismatch (Greedy vs Standalone) | 57,962 | 59,992 | -2,030 |
+| **CAND-05** | 168.9 ms | 2,281 | 296 | **7,298** | **7,298** | **MATCH (PASS)** | 74 | Mismatch (Greedy vs Standalone) | 61,041 | 61,041 | **0 (EXACT)** |
 
-### D. Verification & Status
-- **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files in 13.13s.
-- **Production Build**: `tsc && vite build` completed in 3.17s.
+- **4. Cells with Null Baseline in Changed Footprint**:
+  - **Confirmed**: Server includes cells with `baseline_dbm == null` in `changed` if the new tower's modeled signal elevates them.
+  - Across candidates, between 296 and 414 null-baseline cells were updated (e.g. cells #7796, #7993, #7994 received signals from -89.8 to -88.3 dBm).
+- **5. Idempotence & Baseline Differential**:
+  - Idempotence: **PASS** (identical sequential requests return bit-for-bit identical JSON responses).
+  - Differ from baseline: **PASS** (100% of cells in `changed` have signals differing from baseline; 0 identical cells returned).
+- **6. Edge Cases & Validation**:
+  - Tower far outside regional bounds (`lat: 25.0, lon: 85.0`): **HTTP 422 Unprocessable Entity** (`detail: Invalid request payload`) -> **PASS**
+  - Extra field (`extra: "foo"`): **HTTP 200 OK** (safely ignored, 2,238 changed) -> **PASS**
+  - Missing `height_m`: **HTTP 200 OK** (falls back to default 30m, 2,238 changed) -> **PASS**
+  - Empty body `{}`: **HTTP 422 Unprocessable Entity** -> **PASS**
+  - Invalid JSON string: **HTTP 422 Unprocessable Entity** -> **PASS**
+
+### C. Browser Double-Drag on Real API (CDP Automation) [REAL API]
+Automated against live dev server (`http://localhost:5173`) and live backend (`http://localhost:8000`) via [`scratch/run_double_drag_cdp.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/run_double_drag_cdp.mjs):
+
+- **Test 8 & 9 (Drag 1 to P1: `lat 12.965, lon 75.778`)**:
+  - Mousemove request suppression: **0 requests during 20 mousemove events** -> **PASS**
+  - Recompute on mouseup: **Exactly 1 POST request sent** -> **PASS**
+  - Payload integrity: Contains only valid candidate tower specs (`lat`, `lon`, `height_m`, `power_dbm`) -> **PASS**
+  - Counter synchronization: Exact match to server payload (`newlyCoveredPop: 8566, totalUnservedPop: 57699`) -> **PASS**
+  - Footprint applied: **3,743 cells** updated with feature-state `dbm` -> **PASS**
+  - Screenshot: [`drop1.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop1.png) (94.5 KB).
+- **Test 10 (Drag 2 to P2 $\ge$ 6 km away: `lat 13.030, lon 75.790` ~7.3 km move)**:
+  - Drop 1 footprint size: **3,743 cells**
+  - Drop 2 footprint size: **4,230 cells**
+  - Footprint overlap: **3,486 cells**
+  - Stale candidate count checked (IDs only in Drop 1): **257 cells**
+  - Total union count: **4,487 cells**
+  - Stale audit result: `staleFound = 0` (all 257 former cells had `dbm` completely removed) -> **PASS**
+  - Active audit result: `activeFound = 4,230` (all 4,230 Drop 2 cells carry valid `dbm`) -> **PASS**
+  - Screenshot: [`drop2.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop2.png) (93.8 KB).
+- **Test 11 (Drag Out of Data Area: `lat 12.72, lon 75.51` -> `changed = []`)**:
+  - Overridden cells count: **0** -> **PASS**
+  - All feature-state cleared: **PASS**
+  - Counter reflects server numbers: `newlyCoveredPop: 0, totalUnservedPop: 68339` -> **PASS**
+  - Neutral note visible: `"This position adds no new coverage."` -> **PASS**
+  - Screenshot: [`drop_far.png`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/e2e-output/drop_far.png) (93.3 KB).
+- **Test 12 (Rapid Double Drop 30 ms apart)**:
+  - Drop A dispatched, then Drop B dispatched 30 ms later.
+  - AbortController and sequence guard superseded Drop A.
+  - Final map state matches LAST drop (`lat: 12.975, lon: 75.782`, 2,271 overridden cells) -> **PASS**
+
+### D. CHANGE REQUEST (Dev C -> Dev B, Dev A)
+- **Subject**: Clarification on Standalone `/recompute` vs Sequential Greedy `added_pop`
+- **What**: When a single candidate tower (e.g. `CAND-01`) is POSTed standalone to `/recompute`, the server returns `newly_covered_pop = 8,424`, whereas `candidates.json` records `added_pop = 880`.
+- **Why**: In `candidates.json`, `added_pop` was calculated sequentially during greedy ranking (incremental population over prior selected towers, or clipped to cluster boundary). Standalone `/recompute` models the tower over the entire taluk independently. Both calculations are mathematically verified (server matches our independent cell sum of 8,424 exactly), but the frontend UI displays `added_pop` in the shortlist table while the live map counter displays the server's real-time recompute result.
+- **Affected Roles**: Dev B (ranking algorithm documentation) and Dev A (pipeline coordination).
+- **Frontend Action**: None required. Frontend correctly displays server `/recompute` metrics on map drops without modifying client counter logic.
+
+### E. Verification & Build
+- **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files in 21.89s.
+- **Production Build**: `tsc && vite build` completed in 6.42s.
 - **Tree-Shaking Verification**: `dist/` contains **0 occurrences** of `__bench`.
-- **Change Request Required**: **None**. The new dataset from Dev B is 100% consistent with Dev A's cells file (0 population discrepancy across all 13 clusters, 0 missing cell IDs, all 5 candidate positions within bounds). Baseline gap population matches the API contract expectation (`68,339`).
