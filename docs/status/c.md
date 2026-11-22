@@ -470,3 +470,80 @@ Tested in headless browser via CDP ([`test_pixel_task1d.mjs`](file:///C:/Users/2
 - **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files in 11.00s.
 - **Production Build**: `tsc && vite build` completed in 3.06s.
 - **Tree-Shaking**: **0 occurrences** of `__bench` in `dist/`.
+
+## Task 2b: Real API & Data Cross-Check [DEV B DATA & REAL API EVALUATION]
+
+### A. Data Cross-Check Findings (New Files from Dev B)
+Evaluated [`web/public/data/cells.geojson`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/public/data/cells.geojson), [`web/public/data/candidates.json`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/public/data/candidates.json), and [`web/public/data/clusters.json`](file:///c:/Users/20635/OneDrive/Desktop/taar/web/public/data/clusters.json) via [`scratch/task2b_data_check.mjs`](file:///C:/Users/20635/.gemini/antigravity/brain/ada43e68-e0e2-4fb7-b0e8-99fdeed257b1/scratch/task2b_data_check.mjs).
+
+- **Overview**:
+  - Total Clusters: **13 clusters** (`CL-01` to `CL-13`).
+  - Total Candidates: **5 candidates** (`CAND-01` to `CAND-05`), all assigned to `CL-01`.
+  - Cells ID Range: `[1, 11394]` (Count: 11,394).
+  - Cluster `cell_ids` Range: `[1, 11387]` (Total cell references: 1,747).
+  - Missing Cluster Cell IDs in `cells.geojson`: **0** (100% referential integrity).
+  - Missing Candidate Cluster References: **0** (All candidates reference valid cluster `CL-01`).
+  - Cells Bounding Box: Lat `[12.80000, 13.10000]`, Lon `[75.60000, 75.95000]`.
+  - Candidate Bounding Box Check: **All 5 candidates fall inside cells geographic bounds**.
+  - Total Baseline Gap Population (`state === 'gap'` across 2,050 cells): **`68,339 residents`**.
+
+- **Cluster-by-Cluster Consistency Table**:
+| Cluster ID | Cell Count | Recorded `pop_in_gap` | Sum Pop (`state == 'gap'`) | Sum Pop (All Cells) | Discrepancy | Candidate IDs | Needs Field Survey |
+| :---: | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
+| **CL-01** | 1,308 | 46,290 | 46,290 | 46,290 | **0** | `CAND-01, CAND-02, CAND-03, CAND-04, CAND-05` | False |
+| **CL-02** | 231 | 6,317 | 6,317 | 6,317 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-03** | 111 | 3,637 | 3,637 | 3,637 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-04** | 26 | 465 | 465 | 465 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-05** | 18 | 165 | 165 | 165 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-06** | 14 | 150 | 150 | 150 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-07** | 12 | 138 | 138 | 138 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-08** | 8 | 196 | 196 | 196 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-09** | 6 | 112 | 112 | 112 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-10** | 4 | 19 | 19 | 19 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-11** | 3 | 20 | 20 | 20 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-12** | 3 | 48 | 48 | 48 | **0** | *(empty: needs field survey)* | **True** |
+| **CL-13** | 3 | 31 | 31 | 31 | **0** | *(empty: needs field survey)* | **True** |
+
+- **Candidate Siting & Population Feasibility**:
+| Candidate ID | Target Cluster | Lat / Lon | In Bounds | Height / Power | Added Pop | Parent Cluster Gap Pop | Added $\le$ Cluster Gap |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **CAND-01** | CL-01 | 12.903751, 75.751249 | Yes | 30 m / 43 dBm | 880 | 46,290 | **True** |
+| **CAND-02** | CL-01 | 12.906250, 75.766249 | Yes | 30 m / 43 dBm | 557 | 46,290 | **True** |
+| **CAND-03** | CL-01 | 12.908750, 75.748749 | Yes | 30 m / 43 dBm | 188 | 46,290 | **True** |
+| **CAND-04** | CL-01 | 12.903750, 75.753749 | Yes | 30 m / 43 dBm | 113 | 46,290 | **True** |
+| **CAND-05** | CL-01 | 12.916250, 75.746249 | Yes | 30 m / 43 dBm | 74 | 46,290 | **True** |
+
+- **Cells File vs API Comparison**:
+  - `api/main.py` candidate paths in order:
+    1. `REPO_ROOT / "web" / "public" / "data" / "cells.geojson"` (exists: true, loaded first).
+    2. `REPO_ROOT / "data" / "processed" / "cells.geojson"` (exists: true).
+    3. `REPO_ROOT / "contracts" / "mock" / "cells_base.geojson"`.
+  - `web/public/data/cells.geojson` SHA-256: `c0ba3d7fb84807afd2cb96ddb4f6bd234ae743f4c5120879d21c0f5b212fa03d`.
+  - `data/processed/cells.geojson` SHA-256: `c0ba3d7fb84807afd2cb96ddb4f6bd234ae743f4c5120879d21c0f5b212fa03d`.
+  - **Verdict**: Identical file (byte-for-byte SHA-256 match).
+
+### B. Real API Contract Checks (Port 8000)
+- **Reachability Check**:
+  - Checked `http://localhost:8000/docs` and `POST http://localhost:8000/recompute`.
+  - **Status**: **STOPPED / NOT ANSWERING**. Connection refused (`curl: (7) Failed to connect to localhost:8000`).
+  - **Host Environment**: The Windows ARM64 host system lacks a configured Python virtualenv with `uvicorn`, `fastapi`, `numpy`, and `rasterio` required to boot `api/main.py`.
+  - Per explicit instruction ("If the API is not answering on http://localhost:8000, STOP and say so; do not use the mock server. Anything not run is 'NOT DONE'"):
+    - CORS Header Verification: **NOT DONE**
+    - POST `{"towers": []}` Contract Check: **NOT DONE**
+    - POST Single Candidate Checks: **NOT DONE**
+    - Null Baseline Changed Cell Check: **NOT DONE**
+    - Idempotence & Validation 4xx Edge Cases: **NOT DONE**
+
+### C. Browser Double-Drag on Real API (CDP)
+- Per explicit instruction to test strictly against the real API on `http://localhost:8000` without using the mock server:
+  - Drag 1 (20 mousemoves 0 requests, 1 on mouseup): **NOT DONE (API Down)**
+  - Drag 2 (6 km away, stale footprint audit): **NOT DONE (API Down)**
+  - Drag 3 (Out of bounds empty changed): **NOT DONE (API Down)**
+  - Rapid double drop (30 ms apart): **NOT DONE (API Down)**
+  - Note: All UI drag behaviors, request deduplication, sequence guards, and footprint lifecycle were previously verified passing under Task 2/Task 4 CDP automation.
+
+### D. Verification & Status
+- **Vitest Unit Test Suite**: **51 / 51 tests passed** across all 7 test files in 13.13s.
+- **Production Build**: `tsc && vite build` completed in 3.17s.
+- **Tree-Shaking Verification**: `dist/` contains **0 occurrences** of `__bench`.
+- **Change Request Required**: **None**. The new dataset from Dev B is 100% consistent with Dev A's cells file (0 population discrepancy across all 13 clusters, 0 missing cell IDs, all 5 candidate positions within bounds). Baseline gap population matches the API contract expectation (`68,339`).
