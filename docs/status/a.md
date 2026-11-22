@@ -137,3 +137,23 @@ Formula: **Okumura-Hata open-area (rural) @ 900 MHz**
 * Caches DEM and baseline cells in memory at startup.
 * Endpoints provided: `/health`, `/config`, `/towers`, `/candidates`, `/clusters`, and `POST /recompute`.
 * `POST /recompute` is idempotent, correctly calculates newly covered population, and executes in ~29 ms.
+
+---
+
+## Model facts (for Dev D)
+All parameters below are read directly from `contracts/config.json`:
+- **Frequency**: 900.0 MHz
+- **Formula used**: Okumura-Hata with open-area (rural) correction (per frequency $\le 1500\text{ MHz}$ rule)
+- **EIRP**: 43.0 dBm (assumed 20 W macrocell conducted power)
+- **Receiver height**: 1.5 m (standard handheld mobile height)
+- **Tower height**: 30.0 m (assumed default base station height above ground)
+- **Shadow penalty**: 15.0 dB (flat diffraction penalty for terrain-obstructed cells)
+- **Gap threshold**: -100.0 dBm
+- **Uncertain band**: $\pm 6.0\text{ dB}$ (covered $\ge -94.0\text{ dBm}$, gap $< -106.0\text{ dBm}$, uncertain $[-106.0, -94.0]\text{ dBm}$)
+- **Max radius**: 10.0 km (maximum polar sweep propagation radius)
+- **Ray count**: 720 rays (0.5° angular resolution)
+- **Ray step**: 30.0 m (radial DEM sample step)
+
+All values are assumptions, results are modeled, not measured, and not validated for Karnataka.
+
+An "unknown" state means there is no tower evidence nearby to evaluate coverage. It does not mean the cell is a dead zone, but rather that empirical data is absent to make a modeled determination.

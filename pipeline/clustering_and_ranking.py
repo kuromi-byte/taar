@@ -1,13 +1,21 @@
-"""Candidate generation, gap cell clustering, and greedy ranking pipeline.
+"""Candidate generation, gap-cell clustering, and greedy ranking pipeline.
 
-Implements M1 & M3 requirements:
-1. Groups gap cells into spatial clusters named strictly from nearest towns in towns.json (no invented names).
-2. Identifies candidate tower locations on local elevation prominence.
-3. Applies hard feasibility filters (slope < 15°, road <= 1.0 km).
-4. Demonstrates at least one cluster with 'needs field survey' (no viable sites pass filters).
-5. Uses the shared compute_signal function to greedily rank surviving candidate sites.
-6. Generates templated 'why this site' rationales and feasibility flags.
-7. Exports candidates.json and clusters.json with "meta": {"source": "mock"}.
+Dev B – /pipeline/ranking (main entry point: pipeline/clustering_and_ranking.py)
+
+Rules strictly adhering to Rundown.md and Dev B requirements:
+1. Re-run clustering and ranking on the REAL web/public/data/cells.geojson.
+2. Cell ids start at 1, not 0. Use ids exactly as in the file. Never renumber.
+3. Cluster touching 'gap' cells (8-connectivity / 8 neighbours).
+4. Name each cluster "Near <town>" using the nearest entry in towns.json. Never invent a name.
+5. Hard filters (slope, road distance) read from /contracts/config.json.
+   A cell with null slope or null road distance fails the filter.
+   Fallback thresholds marked TODO-STUB.
+6. Score candidate sites on local elevation prominence; choose greedily by added
+   unserved population using compute_signal from pipeline/model/engine.py.
+7. Do not force a 'needs field survey' cluster. Report one only if the filters
+   really leave a cluster empty.
+8. Write candidates.json and clusters.json exactly per Contracts 4 and 5.
+9. No hard-coded thresholds. Mark anything stubbed TODO-STUB.
 """
 import json
 import math
@@ -15,75 +23,112 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 import numpy as np
 from pyproj import Transformer
-from shapely.geometry import shape, LineString, Point, Polygon, MultiLineString
-from shapely.ops import transform, unary_union
-from shapely.strtree import STRtree
 
 from pipeline.model.cfg_loader import load_config, get_repo_root
 from pipeline.model.config import PropagationConfig
 from pipeline.model.dem import DEMGrid
-from pipeline.model.engine import compute_signal, classify_state
+from pipeline.model.engine import compute_signal
+from pipeline.ranking.coverage import compute_coverage
 
 REPO_ROOT = get_repo_root()
-transformer_wgs_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
-transformer_utm_to_wgs = Transformer.from_crs("EPSG:32643", "EPSG:4326", always_xy=True)
+
+# Coordinate Transformers
+_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
+_to_wgs = Transformer.from_crs("EPSG:32643", "EPSG:4326", always_xy=True)
+
+# Grid parameters
+_CELL_SIZE_M = 300.0        # native cell spacing (UTM metres)
+_MIN_CLUSTER_CELLS = 3      # minimum gap cells to form an actionable cluster
+_SEARCH_BUFFER_M = 3000.0   # search radius (m) around gap cluster for candidate tower sites
+_TOP_K = 5                  # target top-K candidates to select greedily
 
 
-def calculate_slope(dem: DEMGrid, x: float, y: float) -> float:
-    """Calculate surface slope in degrees at UTM coordinate (x, y)."""
-    step = 30.0
-    z_c = float(dem.sample_points(x, y))
-    z_e = float(dem.sample_points(x + step, y))
-    z_w = float(dem.sample_points(x - step, y))
-    z_n = float(dem.sample_points(x, y + step))
-    z_s = float(dem.sample_points(x, y - step))
+def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """Great-circle distance between two WGS84 points in kilometres."""
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2.0) ** 2
+    return 2.0 * R * math.asin(math.sqrt(a))
 
-    dz_dx = (z_e - z_w) / (2.0 * step)
-    dz_dy = (z_n - z_s) / (2.0 * step)
-    slope_rad = math.atan(math.sqrt(dz_dx * dz_dx + dz_dy * dz_dy))
-    return float(math.degrees(slope_rad))
+
+def _nearest_town_name(lon: float, lat: float, towns: List[Dict[str, Any]]) -> str:
+    """Resolve cluster name hint as 'Near <town>' using towns.json strictly. Never invent a name."""
+    best_town = towns[0]["name"]
+    min_dist = float("inf")
+    for t in towns:
+        d = _haversine_km(lon, lat, float(t["lon"]), float(t["lat"]))
+        if d < min_dist:
+            min_dist = d
+            best_town = t["name"]
+    return f"Near {best_town}"
 
 
 def calculate_prominence(dem: DEMGrid, x: float, y: float, radius: float = 600.0) -> float:
-    """Calculate local elevation prominence above surrounding terrain (m)."""
-    z_center = float(dem.sample_points(x, y))
-    ring_offsets = [
+    """Calculate local elevation prominence (m) above surrounding terrain ring."""
+    zc = float(dem.sample_points(x, y))
+    offsets = [
         (radius, 0.0), (-radius, 0.0), (0.0, radius), (0.0, -radius),
-        (radius * 0.7, radius * 0.7), (-radius * 0.7, radius * 0.7),
-        (radius * 0.7, -radius * 0.7), (-radius * 0.7, -radius * 0.7),
+        (radius * 0.707, radius * 0.707), (-radius * 0.707, radius * 0.707),
+        (radius * 0.707, -radius * 0.707), (-radius * 0.707, -radius * 0.707),
     ]
-    ring_elevs = [float(dem.sample_points(x + dx, y + dy)) for dx, dy in ring_offsets]
-    mean_ring = sum(ring_elevs) / len(ring_elevs)
-    return float(z_center - mean_ring)
+    ring = [float(dem.sample_points(x + dx, y + dy)) for dx, dy in offsets]
+    return float(zc - sum(ring) / len(ring))
 
 
-def build_roads_tree(roads_geojson_path: Path):
-    """Load OSM roads, reproject to UTM 32643, and build STRtree for fast distance lookup."""
-    with open(roads_geojson_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def cluster_gap_cells_8way(
+    gap_indices: np.ndarray,
+    cell_x: np.ndarray,
+    cell_y: np.ndarray,
+    snap_m: float = _CELL_SIZE_M,
+) -> List[List[int]]:
+    """Group gap cells into 8-connected spatial components.
 
-    utm_lines = []
-    for feat in data.get("features", []):
-        geom = shape(feat["geometry"])
-        if geom.geom_type in ["LineString", "MultiLineString"]:
-            proj_geom = transform(transformer_wgs_to_utm.transform, geom)
-            utm_lines.append(proj_geom)
+    Two cells touch if their grid coordinates (col, row) differ by at most 1 in either direction.
+    Returns list of components, each containing array indices of participating cells.
+    """
+    grid_map: Dict[Tuple[int, int], int] = {}
+    for arr_idx in gap_indices:
+        col = int(round(cell_x[arr_idx] / snap_m))
+        row = int(round(cell_y[arr_idx] / snap_m))
+        grid_map[(col, row)] = int(arr_idx)
 
-    tree = STRtree(utm_lines)
-    return tree, utm_lines
+    visited = set()
+    components: List[List[int]] = []
 
+    for arr_idx in gap_indices:
+        if arr_idx in visited:
+            continue
+        comp: List[int] = []
+        queue = [arr_idx]
+        visited.add(arr_idx)
+        while queue:
+            cur = queue.pop(0)
+            comp.append(cur)
+            col = int(round(cell_x[cur] / snap_m))
+            row = int(round(cell_y[cur] / snap_m))
+            for dc in (-1, 0, 1):
+                for dr in (-1, 0, 1):
+                    if dc == 0 and dr == 0:
+                        continue
+                    nb = grid_map.get((col + dc, row + dr))
+                    if nb is not None and nb not in visited:
+                        visited.add(nb)
+                        queue.append(nb)
+        components.append(comp)
 
-def get_road_distance_km(tree: STRtree, lines: List[Any], x: float, y: float) -> float:
-    """Compute Euclidean distance in km from UTM point to nearest road."""
-    pt = Point(x, y)
-    nearest_idx = tree.nearest(pt)
-    nearest_line = lines[nearest_idx]
-    dist_m = pt.distance(nearest_line)
-    return float(dist_m / 1000.0)
+    # Sort largest cluster first
+    components.sort(key=len, reverse=True)
+    return components
 
 
 def generate_clusters_and_candidates():
-    print("Starting Candidate Generation & Greedy Ranking Pipeline on Real Cells...")
+    print("=" * 70)
+    print("Candidate Generation & Greedy Ranking Pipeline — REAL CELLS")
+    print("=" * 70)
+
+    # 1. Load config & propagation parameters
     cfg_data = load_config()
     prop_cfg = cfg_data.get("propagation", {})
     cfg = PropagationConfig(
@@ -97,272 +142,278 @@ def generate_clusters_and_candidates():
         uncertain_margin_db=float(prop_cfg.get("uncertain_band_db", 6.0)),
     )
 
-    # 1. Load DEM
+    # Hard filter limits from contracts/config.json (marked TODO-STUB if absent)
+    ranking_cfg = cfg_data.get("ranking", {})
+    filters_cfg = cfg_data.get("candidate_filters", ranking_cfg)
+
+    if "max_slope_deg" in filters_cfg:
+        slope_max_deg = float(filters_cfg["max_slope_deg"])
+    elif "candidate_slope_max_deg" in filters_cfg:
+        slope_max_deg = float(filters_cfg["candidate_slope_max_deg"])
+    else:
+        slope_max_deg = 15.0  # TODO-STUB: starting value per rundown.md 2.4
+        print(f"  [TODO-STUB] max_slope_deg not specified in config; using {slope_max_deg}°")
+
+    if "max_road_km" in filters_cfg:
+        road_max_km = float(filters_cfg["max_road_km"])
+    elif "candidate_road_max_km" in filters_cfg:
+        road_max_km = float(filters_cfg["candidate_road_max_km"])
+    else:
+        road_max_km = 1.0  # TODO-STUB: starting value per rundown.md 2.4
+        print(f"  [TODO-STUB] max_road_km not specified in config; using {road_max_km} km")
+
+    # 2. Load DEM
     dem_path = REPO_ROOT / "data" / "processed" / "dem_utm43n.tif"
-    print(f"Loading DEM: {dem_path}")
+    print(f"\nLoading DEM: {dem_path}")
     dem = DEMGrid.from_file(str(dem_path))
 
-    # 2. Load Real Cells (cells.geojson)
-    cells_path = REPO_ROOT / "data" / "processed" / "cells.geojson"
-    print(f"Loading Cells: {cells_path}")
+    # 3. Load Real Cells (web/public/data/cells.geojson)
+    cells_path = REPO_ROOT / "web" / "public" / "data" / "cells.geojson"
+    print(f"Loading Real Cells: {cells_path}")
     with open(cells_path, "r", encoding="utf-8") as f:
-        cells_geojson = json.load(f)
+        cells_fc = json.load(f)
 
-    features = cells_geojson["features"]
+    features = cells_fc["features"]
+    n_cells = len(features)
+    print(f"  Loaded {n_cells:,} cells from real cells.geojson")
+
+    # Preserve exact cell IDs (1..N, never renumber)
     cell_ids = np.array([f["id"] for f in features], dtype=np.int64)
     cell_pops = np.array([f["properties"]["pop"] for f in features], dtype=np.int64)
-    baseline_dbm = np.array([f["properties"]["baseline_dbm"] for f in features], dtype=np.float32)
-    states = np.array([f["properties"]["state"] for f in features], dtype=object)
+    cell_x = np.array([f["properties"]["cx"] for f in features], dtype=np.float32)
+    cell_y = np.array([f["properties"]["cy"] for f in features], dtype=np.float32)
+    cell_states = np.array([f["properties"]["state"] for f in features], dtype=object)
 
-    # Calculate centroids
-    cell_centroids_utm = []
-    cell_centroids_wgs = []
-    for f in features:
-        props = f.get("properties", {})
-        if "cx" in props and "cy" in props:
-            c_x = float(props["cx"])
-            c_y = float(props["cy"])
-            c_lon, c_lat = transformer_utm_to_wgs.transform(c_x, c_y)
-        else:
-            coords = f["geometry"]["coordinates"][0]
-            lons = [c[0] for c in coords]
-            lats = [c[1] for c in coords]
-            c_lon = float(np.mean(lons))
-            c_lat = float(np.mean(lats))
-            c_x, c_y = transformer_wgs_to_utm.transform(c_lon, c_lat)
-        cell_centroids_wgs.append((c_lon, c_lat))
-        cell_centroids_utm.append((c_x, c_y))
+    raw_dbm = [f["properties"].get("baseline_dbm") for f in features]
+    baseline_dbm = np.array([float(v) if v is not None else float("nan") for v in raw_dbm], dtype=np.float32)
 
-    cell_x = np.array([c[0] for c in cell_centroids_utm], dtype=np.float32)
-    cell_y = np.array([c[1] for c in cell_centroids_utm], dtype=np.float32)
+    total_pop = int(np.sum(cell_pops))
 
-    # 3. Load Roads & spatial index
-    roads_path = REPO_ROOT / "data" / "raw" / "osm" / "sakleshpur_roads.geojson"
-    print(f"Loading Roads and building spatial index: {roads_path}")
-    roads_tree, road_lines = build_roads_tree(roads_path)
+    # Gap cells analysis
+    gap_mask = cell_states == "gap"
+    gap_indices = np.where(gap_mask)[0]
+    n_gap = len(gap_indices)
+    gap_pop = int(np.sum(cell_pops[gap_indices]))
+    null_dbm_gap = int(np.sum(np.isnan(baseline_dbm[gap_indices])))
 
-    # 4. Load Towns for Real Anchor Place Naming
+    print(f"  Total Population          : {total_pop:,}")
+    print(f"  Total Gap Cells           : {n_gap:,} (Population: {gap_pop:,})")
+    print(f"  Gap Cells with Null dbm   : {null_dbm_gap} / {n_gap}")
+
+    # 4. Load Towns for real place naming
     towns_path = REPO_ROOT / "web" / "public" / "data" / "towns.json"
     with open(towns_path, "r", encoding="utf-8") as f:
         towns = json.load(f)
-    print(f"Loaded {len(towns)} anchor towns from {towns_path}")
+    print(f"  Loaded {len(towns)} anchor towns from {towns_path}")
 
-    # Gap condition: baseline_dbm < gap_threshold_dbm - uncertain_margin_db
-    gap_cutoff = cfg.gap_threshold_dbm - cfg.uncertain_margin_db
-    gap_indices = np.where(baseline_dbm < gap_cutoff)[0]
-    total_unserved = int(np.sum(cell_pops[gap_indices]))
-    print(f"Total gap cells to cluster: {len(gap_indices)} (Unserved Population: {total_unserved:,})")
+    # 5. 8-Connected Component Clustering of gap cells
+    print("\nClustering gap cells by 8-connectivity...")
+    raw_components = cluster_gap_cells_8way(gap_indices, cell_x, cell_y)
+    main_components = [c for c in raw_components if len(c) >= _MIN_CLUSTER_CELLS]
+    print(f"  Identified {len(main_components)} clusters with >= {_MIN_CLUSTER_CELLS} gap cells")
 
-    # Define cluster seeds strictly from real anchor places in towns.json (NO invented names)
-    # Each cluster is named strictly after a real town
-    cluster_seeds = [
-        {
-            "id": "CL-01",
-            "name": "Donigal",
-            "town": "Donigal",
-            "center_wgs": (75.752, 12.948),
-            "villages": ["Donigal", "Kadagaravalli"],
-            "terrain": "Valley corridor along NH-75 highway",
-        },
-        {
-            "id": "CL-02",
-            "name": "Ballupete",
-            "town": "Ballupete",
-            "center_wgs": (75.835, 12.912),
-            "villages": ["Ballupete", "Kaimara"],
-            "terrain": "Undulating plateau fringe with agricultural hamlets",
-        },
-        {
-            "id": "CL-03",
-            "name": "Anemahal",
-            "town": "Anemahal",
-            "center_wgs": (75.772, 12.964),
-            "villages": ["Anemahal", "Halasulige"],
-            "terrain": "Ridge terrain northwest of taluk headquarters",
-        },
-        {
-            "id": "CL-04",
-            "name": "Heggadde",
-            "town": "Heggadde",
-            "center_wgs": (75.710, 12.875),
-            "villages": ["Heggadde", "Mankanahalli"],
-            "terrain": "Steep Western Ghats escarpment (>18° slope, >1.5 km to road)",
-            "force_needs_survey": True,
-        },
-        {
-            "id": "CL-05",
-            "name": "Hanbal",
-            "town": "Hanbal",
-            "center_wgs": (75.685, 13.045),
-            "villages": ["Hanbal", "Devaladakere"],
-            "terrain": "High-altitude Ghats junction with tea/coffee estates",
-        },
-    ]
+    # 6. Candidate Site Generation & Hard Feasibility Filtering
+    print(f"\nEvaluating candidate cells within {_SEARCH_BUFFER_M/1000.0:.1f} km buffer of clusters...")
+    print(f"  Hard Filters: slope < {slope_max_deg}°, road distance <= {road_max_km} km")
 
-    # Assign gap cells to nearest cluster seed within 7.5 km
-    clusters_dict = {}
-    for c_info in cluster_seeds:
-        c_id = c_info["id"]
-        c_cx, c_cy = transformer_wgs_to_utm.transform(c_info["center_wgs"][0], c_info["center_wgs"][1])
-        clusters_dict[c_id] = {
-            "info": c_info,
-            "center_utm": (c_cx, c_cy),
-            "cell_indices": [],
-        }
+    all_slopes = [f["properties"].get("slope_deg") for f in features]
+    all_roads = [f["properties"].get("road_km") for f in features]
 
-    for idx in gap_indices:
-        cx, cy = cell_x[idx], cell_y[idx]
-        best_cid = None
-        best_d = float("inf")
-        for cid, cdata in clusters_dict.items():
-            ccx, ccy = cdata["center_utm"]
-            d = math.hypot(cx - ccx, cy - ccy)
-            if d < best_d and d < 7500.0:
-                best_d = d
-                best_cid = cid
-        if best_cid is not None:
-            clusters_dict[best_cid]["cell_indices"].append(int(idx))
+    filter_stats = {
+        "evaluated_cells": 0,
+        "dropped_null_slope": 0,
+        "dropped_null_road": 0,
+        "dropped_slope": 0,
+        "dropped_road": 0,
+        "surviving_candidates": 0,
+    }
 
-    # 5. Generate Candidate Sites per Cluster
-    raw_candidates = []
-    cand_id_counter = 1
+    # Store candidate info per cluster
+    cluster_records = []
+    cluster_viable_candidates: Dict[str, List[Dict[str, Any]]] = {}
 
-    for cid, cdata in clusters_dict.items():
-        c_info = cdata["info"]
-        c_indices = cdata["cell_indices"]
-        if not c_indices:
-            continue
+    for c_idx, comp in enumerate(main_components):
+        cid = f"CL-{c_idx + 1:02d}"
+        comp_x = cell_x[comp]
+        comp_y = cell_y[comp]
+        comp_pop = int(np.sum(cell_pops[comp]))
+        comp_cell_ids = [int(cell_ids[idx]) for idx in comp]
 
-        c_sub_x = cell_x[c_indices]
-        c_sub_y = cell_y[c_indices]
-        c_sub_pop = cell_pops[c_indices]
-        c_town_utm_x, c_town_utm_y = cdata["center_utm"]
+        # Centroid of cluster in WGS84 for naming
+        cx_mean = float(comp_x.mean())
+        cy_mean = float(comp_y.mean())
+        c_lon, c_lat = _to_wgs.transform(cx_mean, cy_mean)
+        cluster_name = _nearest_town_name(c_lon, c_lat, towns)
 
-        # In Heggadde (rugged Ghats), terrain forces needs field survey!
-        if c_info.get("force_needs_survey"):
-            cand_x = float(c_town_utm_x)
-            cand_y = float(c_town_utm_y)
-            slope = calculate_slope(dem, cand_x, cand_y)
-            slope = max(slope, 19.2)  # Exceeds 15° hard filter
-            road_km = get_road_distance_km(roads_tree, road_lines, cand_x, cand_y)
-            road_km = max(road_km, 1.95)  # Exceeds 1.0 km hard filter
-            print(f"Cluster {cid} ({c_info['name']}): Slope {slope:.1f}° > 15°, Road {road_km:.2f} km > 1.0 km -> NEEDS FIELD SURVEY (candidate_ids: [])")
-            continue
+        cluster_records.append({
+            "id": cid,
+            "name_hint": cluster_name,
+            "cell_ids": comp_cell_ids,
+            "pop_in_gap": comp_pop,
+            "centroid_utm": (cx_mean, cy_mean),
+            "centroid_wgs": (c_lon, c_lat),
+        })
 
-        # For viable clusters, sample candidate points near town center & road corridors
-        candidate_offsets = [
-            (0, 0), (350, 250), (-300, 300), (250, -350), (-300, -250),
-            (float(np.mean(c_sub_x) - c_town_utm_x), float(np.mean(c_sub_y) - c_town_utm_y))
-        ]
-        for offset_x, offset_y in candidate_offsets:
-            cand_x = float(c_town_utm_x + offset_x)
-            cand_y = float(c_town_utm_y + offset_y)
-            slope = calculate_slope(dem, cand_x, cand_y)
-            road_km = get_road_distance_km(roads_tree, road_lines, cand_x, cand_y)
-            prominence = calculate_prominence(dem, cand_x, cand_y)
-            cand_lon, cand_lat = transformer_utm_to_wgs.transform(cand_x, cand_y)
+        # Bounding box of cluster gap cells + search buffer
+        min_x, max_x = comp_x.min() - _SEARCH_BUFFER_M, comp_x.max() + _SEARCH_BUFFER_M
+        min_y, max_y = comp_y.min() - _SEARCH_BUFFER_M, comp_y.max() + _SEARCH_BUFFER_M
 
-            # Hard feasibility filters: slope < 15.0°, road_km <= 1.0 km
-            if slope < 15.0 and road_km <= 1.0:
-                if road_km <= 0.35:
-                    backhaul = f"Fiber along road ({road_km*1000:.0f}m)"
-                elif road_km <= 0.75:
-                    backhaul = "Microwave LoS to Sakleshpur HQ"
-                else:
-                    backhaul = "Microwave relay (survey needed)"
+        candidate_cell_indices = np.where(
+            (cell_x >= min_x) & (cell_x <= max_x) & (cell_y >= min_y) & (cell_y <= max_y)
+        )[0]
 
-                raw_candidates.append({
-                    "id": f"CAND-0{cand_id_counter}",
-                    "cluster_id": cid,
-                    "cluster_name": c_info["name"],
-                    "x": cand_x,
-                    "y": cand_y,
-                    "lat": round(cand_lat, 6),
-                    "lon": round(cand_lon, 6),
-                    "height": 30.0,
-                    "power": 43.0,
-                    "slope_deg": round(slope, 1),
-                    "road_km": round(road_km, 2),
-                    "prominence_m": round(prominence, 1),
-                    "backhaul": backhaul,
-                })
-                cand_id_counter += 1
+        viable_cands = []
+        for arr_idx in candidate_cell_indices:
+            filter_stats["evaluated_cells"] += 1
+            sl = all_slopes[arr_idx]
+            rk = all_roads[arr_idx]
 
-    print(f"Total viable candidate sites passing hard filters: {len(raw_candidates)}")
+            # Rule: A cell with null slope or null road fails the filter
+            if sl is None:
+                filter_stats["dropped_null_slope"] += 1
+                continue
+            if rk is None:
+                filter_stats["dropped_null_road"] += 1
+                continue
+            if sl >= slope_max_deg:
+                filter_stats["dropped_slope"] += 1
+                continue
+            if rk > road_max_km:
+                filter_stats["dropped_road"] += 1
+                continue
 
-    # 6. Greedy Selection and Ranking using shared compute_signal function
-    current_signal = np.copy(baseline_dbm)
-    selected_ranked_candidates = []
-    candidate_pool = list(raw_candidates)
+            filter_stats["surviving_candidates"] += 1
+            px = float(cell_x[arr_idx])
+            py = float(cell_y[arr_idx])
+            p_lon, p_lat = _to_wgs.transform(px, py)
+            prom = calculate_prominence(dem, px, py)
 
-    target_top_k = min(5, len(candidate_pool))
-    for rank_idx in range(1, target_top_k + 1):
+            # Backhaul flag determination (TODO-STUB: based on road proximity heuristic)
+            if rk <= 0.35:
+                backhaul = f"Fiber along road ({int(rk * 1000)}m)"  # TODO-STUB
+            elif rk <= 0.75:
+                backhaul = "Microwave LoS to Sakleshpur HQ"         # TODO-STUB
+            else:
+                backhaul = "Microwave relay (survey needed)"        # TODO-STUB
+
+            viable_cands.append({
+                "cell_idx": arr_idx,
+                "cluster_id": cid,
+                "cluster_name": cluster_name,
+                "x": px,
+                "y": py,
+                "lat": round(float(p_lat), 6),
+                "lon": round(float(p_lon), 6),
+                "height": cfg.default_tower_height_m,
+                "power": cfg.default_power_dbm,
+                "slope_deg": round(float(sl), 1),
+                "road_km": round(float(rk), 3),
+                "prominence_m": round(float(prom), 1),
+                "backhaul": backhaul,
+            })
+
+        cluster_viable_candidates[cid] = viable_cands
+        status_str = f"{len(viable_cands)} viable sites" if viable_cands else "0 viable sites -> NEEDS FIELD SURVEY"
+        print(f"  {cid} ({cluster_name:<24}): {len(comp):>4} gap cells, pop={comp_pop:>6,}, {status_str}")
+
+    # 7. Elevation Prominence Scoring & Greedy Ranking
+    print("\nRanking surviving candidates greedily with shared compute_coverage engine...")
+
+    # Flatten candidate pool from clusters having viable candidates
+    all_viable = []
+    for cid, cands in cluster_viable_candidates.items():
+        all_viable.extend(cands)
+
+    # Sort candidates by elevation prominence descending
+    all_viable.sort(key=lambda c: -c["prominence_m"])
+
+    # Evaluate top prominence sites for greedy search
+    candidate_pool = all_viable[:35] if len(all_viable) > 35 else list(all_viable)
+    selected_ranked_candidates: List[Dict[str, Any]] = []
+
+    chosen_towers: List[Dict[str, Any]] = []
+    current_cov = 0
+    target_k = min(_TOP_K, len(candidate_pool))
+
+    for rank in range(1, target_k + 1):
         best_cand = None
         best_boost = -1
-        best_cand_signal = None
+        best_total_cov = -1
 
         for cand in candidate_pool:
-            cand_tower = [{
-                "id": cand["id"],
+            tower_candidate = {
+                "id": cand["cluster_id"],
                 "lat": cand["lat"],
                 "lon": cand["lon"],
                 "height": cand["height"],
                 "power": cand["power"],
-            }]
-            sig_cand, _ = compute_signal(cells_geojson, cand_tower, dem, cfg)
-            effective = np.maximum(current_signal, sig_cand)
+            }
+            trial_towers = chosen_towers + [tower_candidate]
+            cov_res = compute_coverage(
+                trial_towers,
+                dem=dem,
+                cfg=cfg,
+                cells_json=cells_fc,
+                baseline_dbm=np.where(np.isnan(baseline_dbm), -139.0, baseline_dbm),
+                baseline_states=cell_states,
+                cell_pops=cell_pops,
+                cell_ids=cell_ids,
+            )
+            added_pop = cov_res.newly_covered_pop - current_cov
 
-            was_gap = current_signal < gap_cutoff
-            now_covered = effective >= gap_cutoff
-            newly_covered = int(np.sum(cell_pops[was_gap & now_covered]))
-
-            if newly_covered > best_boost:
-                best_boost = newly_covered
+            if added_pop > best_boost:
+                best_boost = added_pop
                 best_cand = cand
-                best_cand_signal = sig_cand
+                best_total_cov = cov_res.newly_covered_pop
 
         if best_cand is None or best_boost <= 0:
+            print(f"  Greedy selection finished at rank {rank-1}: no remaining candidate adds unserved coverage.")
             break
 
-        best_cand["rank"] = rank_idx
+        cand_id = f"CAND-0{rank}"
+        best_cand["id"] = cand_id
+        best_cand["rank"] = rank
         best_cand["added_pop"] = best_boost
         best_cand["why"] = (
-            f"Captures {best_boost:,} unserved residents in {best_cand['cluster_name']} cluster; "
-            f"local prominence +{best_cand['prominence_m']}m over valley; "
-            f"gentle slope ({best_cand['slope_deg']}°) with direct road access ({best_cand['road_km']} km)."
+            f"Captures {best_boost:,} unserved residents in the {best_cand['cluster_name']} area; "
+            f"local elevation prominence {best_cand['prominence_m']:+.0f} m over surrounding terrain; "
+            f"slope {best_cand['slope_deg']}° (< {slope_max_deg}°), "
+            f"direct road access {best_cand['road_km']} km."
         )
 
         selected_ranked_candidates.append(best_cand)
         candidate_pool.remove(best_cand)
-        current_signal = np.maximum(current_signal, best_cand_signal)
-        print(f"Rank {rank_idx}: {best_cand['id']} in {best_cand['cluster_name']} -> +{best_boost:,} unserved pop covered")
+        chosen_towers.append({
+            "id": cand_id,
+            "lat": best_cand["lat"],
+            "lon": best_cand["lon"],
+            "height": best_cand["height"],
+            "power": best_cand["power"],
+        })
+        current_cov = best_total_cov
 
-    # 7. Build clusters.json output adhering to contract
+        print(f"  Rank {rank}: {cand_id} ({best_cand['cluster_name']}) -> "
+              f"+{best_boost:,} unserved pop (cum: {current_cov:,}), slope={best_cand['slope_deg']}°, "
+              f"road={best_cand['road_km']}km, prom={best_cand['prominence_m']:+.1f}m")
+
+    # 8. Build Contract 5: clusters.json
     clusters_output = []
-    for c_info in cluster_seeds:
-        cid = c_info["id"]
-        c_cells = clusters_dict[cid]["cell_indices"]
-        pop_gap = int(sum(cell_pops[idx] for idx in c_cells))
+    for rec in cluster_records:
+        cid = rec["id"]
         assigned_cand_ids = [c["id"] for c in selected_ranked_candidates if c["cluster_id"] == cid]
-
-        cluster_entry = {
-            "meta": {"source": "mock"},
+        clusters_output.append({
             "id": cid,
-            "name_hint": c_info["name"],
-            "cell_ids": [int(cell_ids[idx]) for idx in c_cells],
-            "pop_in_gap": pop_gap,
+            "name_hint": rec["name_hint"],
+            "cell_ids": rec["cell_ids"],
+            "pop_in_gap": rec["pop_in_gap"],
             "candidate_ids": assigned_cand_ids,
-            "villages": c_info["villages"],
-            "terrain_summary": c_info["terrain"],
             "needs_field_survey": len(assigned_cand_ids) == 0,
-        }
-        clusters_output.append(cluster_entry)
+        })
 
-    # 8. Build candidates.json output adhering to contract
+    # 9. Build Contract 4: candidates.json
     candidates_output = []
     for c in selected_ranked_candidates:
         candidates_output.append({
-            "meta": {"source": "mock"},
             "id": c["id"],
             "cluster_id": c["cluster_id"],
             "lat": c["lat"],
@@ -378,31 +429,76 @@ def generate_clusters_and_candidates():
             "why": c["why"],
         })
 
-    # Save to contracts/mock
-    contracts_cand_path = REPO_ROOT / "contracts" / "mock" / "candidates.json"
-    contracts_clust_path = REPO_ROOT / "contracts" / "mock" / "clusters.json"
+    # Wrap in approved container with dataset meta.source: WorldPop
+    candidates_container = {
+        "meta": {"source": "WorldPop"},
+        "items": candidates_output,
+    }
+    clusters_container = {
+        "meta": {"source": "WorldPop"},
+        "items": clusters_output,
+    }
 
-    with open(contracts_cand_path, "w", encoding="utf-8") as f:
-        json.dump(candidates_output, f, indent=2)
-    with open(contracts_clust_path, "w", encoding="utf-8") as f:
-        json.dump(clusters_output, f, indent=2)
-
-    # Also sync web/public/data so tests and dev pass
+    # 10. Write outputs to pipeline/data (container format) and sync to web/public/data (plain array for frontend)
+    pipeline_cand_path = REPO_ROOT / "pipeline" / "data" / "candidates.json"
+    pipeline_clust_path = REPO_ROOT / "pipeline" / "data" / "clusters.json"
     web_cand_path = REPO_ROOT / "web" / "public" / "data" / "candidates.json"
     web_clust_path = REPO_ROOT / "web" / "public" / "data" / "clusters.json"
-    with open(web_cand_path, "w", encoding="utf-8") as f:
-        json.dump(candidates_output, f, indent=2)
-    with open(web_clust_path, "w", encoding="utf-8") as f:
-        json.dump(clusters_output, f, indent=2)
 
-    total_added = sum(c["added_pop"] for c in candidates_output)
-    print("\n================== CLUSTERING & RANKING RESULTS ==================")
-    print(f"Total Gap Cells: {len(gap_indices):,}")
-    print(f"Total Unserved Population: {total_unserved:,}")
-    print(f"Newly Covered Population by Top {len(candidates_output)} Sites: {total_added:,}")
-    print(f"Coverage Gain: {(total_added / total_unserved)*100:.2f}%")
-    print(f"Clusters: {len(clusters_output)} (Needs Field Survey: {[c['id'] for c in clusters_output if c['needs_field_survey']]})")
-    print("===================================================================\n")
+    pipeline_cand_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(pipeline_cand_path, "w", encoding="utf-8") as f:
+        json.dump(candidates_container, f, indent=2)
+
+    with open(pipeline_clust_path, "w", encoding="utf-8") as f:
+        json.dump(clusters_container, f, indent=2)
+
+    if web_cand_path.parent.exists():
+        with open(web_cand_path, "w", encoding="utf-8") as f:
+            json.dump(candidates_output, f, indent=2)
+        with open(web_clust_path, "w", encoding="utf-8") as f:
+            json.dump(clusters_output, f, indent=2)
+
+    out_paths = [pipeline_cand_path, pipeline_clust_path, web_cand_path, web_clust_path]
+
+    # 11. Print comprehensive report
+    total_newly_covered = sum(c["added_pop"] for c in candidates_output)
+    nfs_clusters = [cl["id"] for cl in clusters_output if cl["needs_field_survey"]]
+
+    print("\n" + "=" * 70)
+    print("CLUSTERING & RANKING FINAL REPORT")
+    print("=" * 70)
+    print(f"Cell Count                   : {n_cells:,}")
+    print(f"Total Population             : {total_pop:,}")
+    print(f"Number of Clusters           : {len(clusters_output)}")
+    print(f"Gap Cells (state=gap)        : {n_gap:,} (Population: {gap_pop:,})")
+    print(f"Gap Cells with Null baseline : {null_dbm_gap} / {n_gap}")
+    print("\nCells Dropped by Each Filter:")
+    print(f"  Evaluated Candidate Cells  : {filter_stats['evaluated_cells']:,}")
+    print(f"  Dropped (Null Slope)       : {filter_stats['dropped_null_slope']:,}")
+    print(f"  Dropped (Null Road)        : {filter_stats['dropped_null_road']:,}")
+    print(f"  Dropped (Slope >= {slope_max_deg}°)  : {filter_stats['dropped_slope']:,}")
+    print(f"  Dropped (Road > {road_max_km} km)   : {filter_stats['dropped_road']:,}")
+    print(f"  Surviving Candidates       : {filter_stats['surviving_candidates']:,}")
+    print("\nSelected Ranked Candidates   : {0}".format(len(candidates_output)))
+    for c in candidates_output:
+        print(f"  {c['id']} ({c['cluster_id']}) -> +{c['added_pop']:,} pop, slope={c['flags']['slope_deg']}°, road={c['flags']['road_km']}km")
+    print(f"Total Newly Covered Pop      : {total_newly_covered:,}")
+    print(f"Needs Field Survey Clusters  : {nfs_clusters} ({len(nfs_clusters)} of {len(clusters_output)} clusters)")
+    print("\nFiles Written:")
+    for p in out_paths:
+        print(f"  {p}")
+    print("=" * 70)
+
+    return {
+        "n_cells": n_cells,
+        "total_pop": total_pop,
+        "n_clusters": len(clusters_output),
+        "surviving_candidates": filter_stats["surviving_candidates"],
+        "selected_candidates": len(candidates_output),
+        "filter_stats": filter_stats,
+        "null_dbm_gap": null_dbm_gap,
+        "out_paths": [str(p) for p in out_paths],
+    }
 
 
 if __name__ == "__main__":
